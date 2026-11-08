@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inkleaf Reader</title>
+<link rel="stylesheet" href="styles.css">
+<script type="module" src="app.js"></script>
+</head>
+<body data-theme="dark" data-view="library">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-toc" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"/></symbol>
+    <symbol id="i-type" viewBox="0 0 24 24"><path d="M3 19L8 6l5 13M4.8 14.5h6.4M14.5 19l3.5-9 3.5 9M15.6 16.3h4.8"/></symbol>
+    <symbol id="i-full" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 6.5a1 1 0 011-1h5l2 2h8a1 1 0 011 1v9.5a1 1 0 01-1 1h-15a1 1 0 01-1-1z"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="8.5" rx="1"/><rect x="13.5" y="4" width="6.5" height="8.5" rx="1"/><rect x="4" y="15" width="6.5" height="5" rx="1"/><rect x="13.5" y="15" width="6.5" height="5" rx="1"/></symbol>
+    <symbol id="i-shelf" viewBox="0 0 24 24"><path d="M3 20.5h18M5.5 20.5V6.5h3v14M9.5 20.5V4.5h3v16M14 20.5l2.2-13.2 3 .5-2 12.7"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 015.5 4H11v16H5.5A1.5 1.5 0 014 18.5zM20 5.5A1.5 1.5 0 0018.5 4H13v16h5.5a1.5 1.5 0 001.5-1.5z"/></symbol>
+  </defs>
+</svg>
+
+<!-- ================= LIBRARY ================= -->
+<section id="library" aria-label="Library">
+  <header class="lib-header">
+    <div class="brand"><svg class="ic"><use href="#i-book"/></svg><span>Inkleaf</span></div>
+    <div class="lib-search">
+      <svg class="ic"><use href="#i-search"/></svg>
+      <input id="lib-filter" type="search" placeholder="Search your library" autocomplete="off">
+    </div>
+    <div class="view-toggle" id="lib-mode" role="radiogroup" aria-label="Library view">
+      <button data-mode="covers" title="Covers view" aria-label="Covers view"><svg class="ic"><use href="#i-grid"/></svg></button>
+      <button data-mode="shelf" title="Bookshelf view" aria-label="Bookshelf view"><svg class="ic"><use href="#i-shelf"/></svg></button>
+    </div>
+    <select id="lib-sort" title="Sort">
+      <option value="recent">Recently read</option>
+      <option value="added">Recently added</option>
+      <option value="title">Title</option>
+      <option value="author">Author</option>
+      <option value="progress">Progress</option>
+    </select>
+    <button id="lib-import" class="btn ghost" title="Import every e-book in a folder"><svg class="ic"><use href="#i-folder"/></svg><span>Import folder</span></button>
+    <button id="lib-open" class="btn primary" title="Open book (Ctrl+O)"><svg class="ic"><use href="#i-plus"/></svg><span>Open book</span></button>
+  </header>
+
+  <div id="continue" hidden></div>
+  <div id="lib-label" class="section-label" hidden></div>
+  <div id="lib-grid" class="grid"></div>
+
+  <div id="lib-empty" hidden>
+    <div class="empty-art"><svg class="ic"><use href="#i-book"/></svg></div>
+    <h2>Your shelf is empty</h2>
+    <p>Drop EPUB, MOBI, AZW3, PDF, FB2 or CBZ files anywhere in this window, or</p>
+    <div class="empty-actions">
+      <button class="btn primary" data-action="open"><svg class="ic"><use href="#i-plus"/></svg><span>Open a book</span></button>
+      <button class="btn ghost" data-action="import"><svg class="ic"><use href="#i-folder"/></svg><span>Import a folder</span></button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= READER ================= -->
+<section id="reader" aria-label="Reader">
+  <header id="topbar" class="bar">
+    <button class="icon-btn" id="btn-library" title="Back to library (Esc)"><svg class="ic"><use href="#i-back"/></svg></button>
+    <button class="icon-btn" id="btn-toc" title="Contents (T)"><svg class="ic"><use href="#i-toc"/></svg></button>
+    <div class="titles">
+      <div id="book-title"></div>
+      <div id="chapter-title"></div>
+    </div>
+    <button class="icon-btn" id="btn-search" title="Search (Ctrl+F)"><svg class="ic"><use href="#i-search"/></svg></button>
+    <button class="icon-btn" id="btn-bookmark" title="Bookmark this page (Ctrl+B)"><svg class="ic"><use href="#i-bookmark"/></svg></button>
+    <button class="icon-btn" id="btn-settings" title="Reading settings"><svg class="ic"><use href="#i-type"/></svg></button>
+    <button class="icon-btn" id="btn-full" title="Full screen (F11)"><svg class="ic"><use href="#i-full"/></svg></button>
+  </header>
+
+  <div id="stage">
+    <button class="edge-nav left" id="nav-prev" title="Previous page"><svg class="ic"><use href="#i-left"/></svg></button>
+    <div id="view-host"></div>
+    <button class="edge-nav right" id="nav-next" title="Next page"><svg class="ic"><use href="#i-right"/></svg></button>
+    <button id="history-back" hidden>↩ Back to where you were</button>
+  </div>
+
+  <footer id="bottombar" class="bar">
+    <span id="loc-left"></span>
+    <input id="progress" type="range" min="0" max="1" step="0.0001" value="0" aria-label="Book progress">
+    <span id="loc-right"></span>
+  </footer>
+
+  <!-- left drawer: contents / bookmarks / highlights -->
+  <aside id="drawer" class="panel left-panel" aria-label="Navigation">
+    <div class="book-card">
+      <img id="drawer-cover" alt="">
+      <div>
+        <div id="drawer-title"></div>
+        <div id="drawer-author"></div>
+      </div>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="toc">Contents</button>
+      <button class="tab" data-tab="bookmarks">Bookmarks</button>
+      <button class="tab" data-tab="highlights">Notes</button>
+    </div>
+    <div class="tab-body" id="tab-toc"></div>
+    <div class="tab-body" id="tab-bookmarks" hidden></div>
+    <div class="tab-body" id="tab-highlights" hidden></div>
+  </aside>
+
+  <!-- right panel: search -->
+  <aside id="search-panel" class="panel right-panel" aria-label="Search">
+    <div class="panel-head">
+      <div class="search-box">
+        <svg class="ic"><use href="#i-search"/></svg>
+        <input id="search-input" type="search" placeholder="Search in book" autocomplete="off">
+      </div>
+      <button class="icon-btn" data-close="search-panel" title="Close"><svg class="ic"><use href="#i-close"/></svg></button>
+    </div>
+    <div id="search-status"></div>
+    <div id="search-results"></div>
+  </aside>
+
+  <!-- settings popover -->
+  <div id="settings" class="popover" hidden>
+    <div class="set-row themes" role="radiogroup" aria-label="Theme">
+      <button data-theme-btn="light" class="swatch light" title="Light">Aa</button>
+      <button data-theme-btn="sepia" class="swatch sepia" title="Sepia">Aa</button>
+      <button data-theme-btn="dark" class="swatch dark" title="Dark">Aa</button>
+      <button data-theme-btn="black" class="swatch black" title="Black (OLED)">Aa</button>
+    </div>
+    <label class="set-row text-only"><span>Font</span>
+      <select id="set-font">
+        <option value="publisher">Book default</option>
+        <option value="Georgia, serif">Georgia</option>
+        <option value="'Palatino Linotype', 'Book Antiqua', Palatino, serif">Palatino</option>
+        <option value="Cambria, serif">Cambria</option>
+        <option value="'Times New Roman', serif">Times</option>
+        <option value="'Atkinson Hyperlegible', 'Segoe UI', sans-serif">Atkinson Hyperlegible</option>
+        <option value="'Segoe UI', system-ui, sans-serif">Segoe UI</option>
+        <option value="Calibri, sans-serif">Calibri</option>
+        <option value="Verdana, sans-serif">Verdana</option>
+        <option value="Consolas, monospace">Consolas</option>
+      </select>
+    </label>
+    <div class="set-row text-only"><span>Size</span>
+      <div class="stepper">
+        <button data-step="fontSize" data-dir="-1" title="Smaller (Ctrl −)">A−</button>
+        <output id="out-fontSize"></output>
+        <button data-step="fontSize" data-dir="1" title="Larger (Ctrl +)">A+</button>
+      </div>
+    </div>
+    <label class="set-row text-only"><span>Line spacing</span><input type="range" id="set-lineHeight" min="1" max="2.4" step="0.05"><output id="out-lineHeight"></output></label>
+    <label class="set-row text-only"><span>Margins</span><input type="range" id="set-gap" min="0" max="20" step="1"><output id="out-gap"></output></label>
+    <label class="set-row text-only"><span>Line width</span><input type="range" id="set-maxWidth" min="400" max="1400" step="20"><output id="out-maxWidth"></output></label>
+    <div class="set-row text-only"><span>Layout</span>
+      <div class="seg" id="set-flow">
+        <button data-val="paginated">Pages</button>
+        <button data-val="scrolled">Scroll</button>
+      </div>
+    </div>
+    <div class="set-row fxl-only"><span>Page fit</span>
+      <div class="seg" id="set-pdfFit">
+        <button data-val="fit-page">Fit page</button>
+        <button data-val="fit-width">Fit width</button>
+      </div>
+    </div>
+    <div class="set-row fxl-only"><span>Zoom</span>
+      <div class="stepper">
+        <button data-zoom="-1" title="Zoom out (Ctrl −)">−</button>
+        <output id="out-zoom"></output>
+        <button data-zoom="1" title="Zoom in (Ctrl +)">+</button>
+      </div>
+    </div>
+    <label class="set-row check pdf-only"><input type="checkbox" id="set-pdfDark"><span>Dark pages (invert colors)</span></label>
+    <div class="set-row"><span>Page turn</span>
+      <div class="seg" id="set-pageTurn">
+        <button data-val="flip">Flip</button>
+        <button data-val="slide">Slide</button>
+        <button data-val="none">None</button>
+      </div>
+    </div>
+    <div class="set-row text-only"><span>Columns</span>
+      <div class="seg" id="set-columns">
+        <button data-val="1">One</button>
+        <button data-val="2">Two (wide)</button>
+      </div>
+    </div>
+    <label class="set-row check text-only"><input type="checkbox" id="set-pageNumbers"><span>Page numbers</span></label>
+    <label class="set-row check text-only"><input type="checkbox" id="set-justify"><span>Justify text</span></label>
+    <label class="set-row check text-only"><input type="checkbox" id="set-hyphenate"><span>Hyphenation</span></label>
+    <label class="set-row check text-only"><input type="checkbox" id="set-override"><span>Override book colors</span></label>
+    <button class="btn ghost small" id="set-reset">Reset to defaults</button>
+  </div>
+
+  <!-- selection / highlight popover -->
+  <div id="sel-pop" class="popover mini" hidden>
+    <div class="note-preview" hidden></div>
+    <div class="sel-actions">
+      <button class="hl-color" data-color="yellow" title="Yellow"></button>
+      <button class="hl-color" data-color="green" title="Green"></button>
+      <button class="hl-color" data-color="blue" title="Blue"></button>
+      <button class="hl-color" data-color="pink" title="Pink"></button>
+      <span class="sep"></span>
+      <button class="txt" data-sel="note">Add note</button>
+      <button class="txt" data-sel="copy">Copy</button>
+      <button class="txt" data-sel="search">Search</button>
+      <button class="txt danger" data-sel="remove" hidden>Remove</button>
+    </div>
+  </div>
+
+  <!-- note editor -->
+  <div id="note-editor" class="popover" hidden role="dialog" aria-label="Note">
+    <div class="ne-head">
+      <span class="ne-title">Add note</span>
+      <div class="ne-colors">
+        <button class="hl-color" data-color="yellow" title="Yellow"></button>
+        <button class="hl-color" data-color="green" title="Green"></button>
+        <button class="hl-color" data-color="blue" title="Blue"></button>
+        <button class="hl-color" data-color="pink" title="Pink"></button>
+      </div>
+    </div>
+    <blockquote class="ne-quote"></blockquote>
+    <textarea id="note-text" placeholder="Write your thoughts, details, a summary… (Enter for a new paragraph)" spellcheck="true"></textarea>
+    <div class="ne-foot">
+      <span class="ne-hint">Ctrl+Enter to save · Esc to cancel</span>
+      <button class="btn ghost small" data-ne="cancel">Cancel</button>
+      <button class="btn primary small" data-ne="save">Save</button>
+    </div>
+  </div>
+</section>
+
+<div id="shelf-tip" hidden>
+  <img alt="">
+  <div>
+    <div class="t-title"></div>
+    <div class="t-author"></div>
+    <div class="t-progress"></div>
+  </div>
+</div>
+<div id="scrim"></div>
+<div id="loading" hidden><div class="spinner"></div><div id="loading-text">Opening…</div></div>
+<div id="drop-overlay"><div>Drop books to open</div></div>
+<div id="toasts" aria-live="polite"></div>
+
+<div id="card-menu" class="popover menu" hidden>
+  <button data-cm="open">Open</button>
+  <button data-cm="folder">Show in folder</button>
+  <button data-cm="reset">Mark as unread</button>
+  <button data-cm="remove" class="danger">Remove from library</button>
+</div>
+</body>
+</html>

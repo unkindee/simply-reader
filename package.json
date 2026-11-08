@@ -1,0 +1,78 @@
+{
+  "name": "inkleaf-reader",
+  "productName": "Inkleaf Reader",
+  "version": "1.0.0",
+  "description": "A desktop e-book reader for EPUB, MOBI, AZW3, FB2 and CBZ",
+  "main": "src/main.js",
+  "author": "drago",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis portable"
+  },
+  "build": {
+    "appId": "com.inkleaf.reader",
+    "productName": "Inkleaf Reader",
+    "files": [
+      "src/**/*",
+      "vendor/foliate-js/**/*",
+      "!vendor/foliate-js/**/*.md",
+      "!vendor/foliate-js/**/*.map",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "src/renderer/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "portable": {
+      "artifactName": "InkleafReader-Portable-${version}.exe"
+    },
+    "fileAssociations": [
+      {
+        "ext": "epub",
+        "name": "EPUB Book",
+        "role": "Viewer"
+      },
+      {
+        "ext": "mobi",
+        "name": "MOBI Book",
+        "role": "Viewer"
+      },
+      {
+        "ext": "azw3",
+        "name": "Kindle Book",
+        "role": "Viewer"
+      },
+      {
+        "ext": "azw",
+        "name": "Kindle Book",
+        "role": "Viewer"
+      },
+      {
+        "ext": "fb2",
+        "name": "FictionBook",
+        "role": "Viewer"
+      },
+      {
+        "ext": "cbz",
+        "name": "Comic Book",
+        "role": "Viewer"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
+  }
+}
