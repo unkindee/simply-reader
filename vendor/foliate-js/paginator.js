@@ -203,7 +203,7 @@ const makeMarginals = (length, part) => Array.from({ length }, () => {
 })
 
 const setStylesImportant = (el, styles) => {
-    if (!el) return // document may be torn down mid-render (Inkleaf patch)
+    if (!el) return // document may be torn down mid-render (Simply Reader patch)
     const { style } = el
     for (const [k, v] of Object.entries(styles)) style.setProperty(k, v, 'important')
 }

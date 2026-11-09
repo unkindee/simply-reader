@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Inkleaf Reader</title>
+<title>Simply Reader</title>
 <link rel="stylesheet" href="styles.css">
 <script type="module" src="app.js"></script>
 </head>
@@ -16,6 +16,11 @@
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></symbol>
     <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"/></symbol>
     <symbol id="i-type" viewBox="0 0 24 24"><path d="M3 19L8 6l5 13M4.8 14.5h6.4M14.5 19l3.5-9 3.5 9M15.6 16.3h4.8"/></symbol>
+    <symbol id="i-footer" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 15h17"/><path d="M7 17.3h6" stroke-width="2.2"/></symbol>
+    <symbol id="i-backup" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="4.5" rx="1"/><path d="M5 9v9.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M9.5 7V4.8h5V7M6.5 7l.9 12.2a1 1 0 0 0 1 .8h7.2a1 1 0 0 0 1-.8L17.5 7M10.2 10.5v6M13.8 10.5v6"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.6v.4"/></symbol>
+    <symbol id="i-theme" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-full" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 6.5a1 1 0 011-1h5l2 2h8a1 1 0 011 1v9.5a1 1 0 01-1 1h-15a1 1 0 01-1-1z"/></symbol>
@@ -23,6 +28,8 @@
     <symbol id="i-left" viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6"/></symbol>
     <symbol id="i-right" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></symbol>
     <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/></symbol>
+    <symbol id="i-stats" viewBox="0 0 24 24"><path d="M4 20h16"/><rect x="5.5" y="11" width="3" height="6.5" rx="1"/><rect x="10.5" y="5" width="3" height="12.5" rx="1"/><rect x="15.5" y="8.5" width="3" height="9" rx="1"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.75" cy="6.5" r="1.1"/><circle cx="4.75" cy="12" r="1.1"/><circle cx="4.75" cy="17.5" r="1.1"/></symbol>
     <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="8.5" rx="1"/><rect x="13.5" y="4" width="6.5" height="8.5" rx="1"/><rect x="4" y="15" width="6.5" height="5" rx="1"/><rect x="13.5" y="15" width="6.5" height="5" rx="1"/></symbol>
     <symbol id="i-shelf" viewBox="0 0 24 24"><path d="M3 20.5h18M5.5 20.5V6.5h3v14M9.5 20.5V4.5h3v16M14 20.5l2.2-13.2 3 .5-2 12.7"/></symbol>
     <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 015.5 4H11v16H5.5A1.5 1.5 0 014 18.5zM20 5.5A1.5 1.5 0 0018.5 4H13v16h5.5a1.5 1.5 0 001.5-1.5z"/></symbol>
@@ -31,16 +38,30 @@
 
 <!-- ================= LIBRARY ================= -->
 <section id="library" aria-label="Library">
+  <div id="bulk-bar" class="bulk-bar" hidden role="region" aria-label="Selected books">
+    <span id="bulk-count" aria-live="polite"></span>
+    <button type="button" class="btn ghost small" id="bulk-clear" title="Clear selection (Esc)">Clear selection</button>
+    <button type="button" class="btn small bulk-remove" id="bulk-remove" title="Remove from library (Delete)"><svg class="ic"><use href="#i-trash"/></svg><span>Remove from library</span></button>
+  </div>
   <header class="lib-header">
-    <div class="brand"><svg class="ic"><use href="#i-book"/></svg><span>Inkleaf</span></div>
+    <div class="brand"><svg class="ic"><use href="#i-book"/></svg><span>Simply Reader</span></div>
+    <button id="lib-stats" class="icon-btn hdr-btn" title="Reading stats" aria-label="Reading stats" hidden><svg class="ic"><use href="#i-stats"/></svg></button>
+    <button id="lib-theme" class="icon-btn hdr-btn" title="Theme" aria-label="Theme" aria-haspopup="true" aria-expanded="false"><svg class="ic"><use href="#i-theme"/></svg></button>
+    <button id="lib-backup" class="icon-btn hdr-btn" title="Backup &amp; restore" aria-label="Backup and restore"><svg class="ic"><use href="#i-backup"/></svg></button>
+    <button id="lib-import" class="btn ghost" title="Import every e-book in a folder"><svg class="ic"><use href="#i-folder"/></svg><span>Import folder</span></button>
+    <button id="lib-open" class="btn primary" title="Open book (Ctrl+O)"><svg class="ic"><use href="#i-plus"/></svg><span>Open book</span></button>
+  </header>
+
+  <div class="lib-top">
+    <div id="continue" hidden></div>
+    <div id="goal-strip" class="goal-strip" aria-label="Reading goals" hidden></div>
+  </div>
+  <div id="lib-toolbar" class="lib-toolbar" hidden>
     <div class="lib-search">
       <svg class="ic"><use href="#i-search"/></svg>
       <input id="lib-filter" type="search" placeholder="Search your library" autocomplete="off">
     </div>
-    <div class="view-toggle" id="lib-mode" role="radiogroup" aria-label="Library view">
-      <button data-mode="covers" title="Covers view" aria-label="Covers view"><svg class="ic"><use href="#i-grid"/></svg></button>
-      <button data-mode="shelf" title="Bookshelf view" aria-label="Bookshelf view"><svg class="ic"><use href="#i-shelf"/></svg></button>
-    </div>
+    <span class="lt-spacer"></span>
     <select id="lib-sort" title="Sort">
       <option value="recent">Recently read</option>
       <option value="added">Recently added</option>
@@ -48,11 +69,13 @@
       <option value="author">Author</option>
       <option value="progress">Progress</option>
     </select>
-    <button id="lib-import" class="btn ghost" title="Import every e-book in a folder"><svg class="ic"><use href="#i-folder"/></svg><span>Import folder</span></button>
-    <button id="lib-open" class="btn primary" title="Open book (Ctrl+O)"><svg class="ic"><use href="#i-plus"/></svg><span>Open book</span></button>
-  </header>
-
-  <div id="continue" hidden></div>
+    <div class="view-toggle" id="lib-mode" role="radiogroup" aria-label="Library view">
+      <button data-mode="covers" title="Covers view" aria-label="Covers view"><svg class="ic"><use href="#i-grid"/></svg></button>
+      <button data-mode="shelf" title="Bookshelf view" aria-label="Bookshelf view"><svg class="ic"><use href="#i-shelf"/></svg></button>
+      <button data-mode="list" title="List view" aria-label="List view"><svg class="ic"><use href="#i-list"/></svg></button>
+    </div>
+  </div>
+  <nav id="lib-filters" class="lib-filters" hidden aria-label="Filter the library"></nav>
   <div id="lib-label" class="section-label" hidden></div>
   <div id="lib-grid" class="grid"></div>
 
@@ -63,6 +86,7 @@
     <div class="empty-actions">
       <button class="btn primary" data-action="open"><svg class="ic"><use href="#i-plus"/></svg><span>Open a book</span></button>
       <button class="btn ghost" data-action="import"><svg class="ic"><use href="#i-folder"/></svg><span>Import a folder</span></button>
+      <button class="btn ghost" data-action="restore" title="Bring back a library saved with Backup &amp; restore"><svg class="ic"><use href="#i-backup"/></svg><span>Restore a backup</span></button>
     </div>
   </div>
 </section>
@@ -79,6 +103,7 @@
     <button class="icon-btn" id="btn-search" title="Search (Ctrl+F)"><svg class="ic"><use href="#i-search"/></svg></button>
     <button class="icon-btn" id="btn-bookmark" title="Bookmark this page (Ctrl+B)"><svg class="ic"><use href="#i-bookmark"/></svg></button>
     <button class="icon-btn" id="btn-settings" title="Reading settings"><svg class="ic"><use href="#i-type"/></svg></button>
+    <button class="icon-btn" id="btn-footer" aria-pressed="false"><svg class="ic"><use href="#i-footer"/></svg></button>
     <button class="icon-btn" id="btn-full" title="Full screen (F11)"><svg class="ic"><use href="#i-full"/></svg></button>
   </header>
 
@@ -90,7 +115,7 @@
   </div>
 
   <footer id="bottombar" class="bar">
-    <span id="loc-left"></span>
+    <button id="loc-left" type="button" title="Go to page (Ctrl+G)"></button>
     <input id="progress" type="range" min="0" max="1" step="0.0001" value="0" aria-label="Book progress">
     <span id="loc-right"></span>
   </footer>
@@ -103,6 +128,7 @@
         <div id="drawer-title"></div>
         <div id="drawer-author"></div>
       </div>
+      <button class="icon-btn" id="drawer-info" title="Book info" aria-label="Book info"><svg class="ic"><use href="#i-info"/></svg></button>
     </div>
     <div class="tabs" role="tablist">
       <button class="tab active" data-tab="toc">Contents</button>
@@ -196,7 +222,13 @@
     <label class="set-row check text-only"><input type="checkbox" id="set-justify"><span>Justify text</span></label>
     <label class="set-row check text-only"><input type="checkbox" id="set-hyphenate"><span>Hyphenation</span></label>
     <label class="set-row check text-only"><input type="checkbox" id="set-override"><span>Override book colors</span></label>
-    <button class="btn ghost small" id="set-reset">Reset to defaults</button>
+    <div class="set-scope">
+      <p id="set-scope-note"></p>
+      <div class="set-scope-btns">
+        <button class="btn ghost small" id="set-make-default" title="Books you haven't adjusted will use these settings" hidden>Use for all books</button>
+        <button class="btn ghost small" id="set-reset">Restore original defaults</button>
+      </div>
+    </div>
   </div>
 
   <!-- selection / highlight popover -->
@@ -210,10 +242,42 @@
       <span class="sep"></span>
       <button class="txt" data-sel="note">Add note</button>
       <button class="txt" data-sel="copy">Copy</button>
+      <button class="txt" data-sel="lookup" title="Dictionary and Wikipedia">Look up</button>
       <button class="txt" data-sel="search">Search</button>
       <button class="txt danger" data-sel="remove" hidden>Remove</button>
     </div>
   </div>
+
+  <!-- footnote pop-up -->
+  <div id="fn-pop" class="popover info-pop" hidden role="dialog" aria-label="Footnote">
+    <div class="ip-head">
+      <span class="ip-title" id="fn-type">Footnote</span>
+      <button class="txt" id="fn-goto" title="Open the note where it appears in the book">Go to note</button>
+      <button class="icon-btn ip-close" data-close-pop title="Close"><svg class="ic"><use href="#i-close"/></svg></button>
+    </div>
+    <div id="fn-body"></div>
+  </div>
+
+  <!-- dictionary / Wikipedia pop-up -->
+  <div id="lookup-pop" class="popover info-pop" hidden role="dialog" aria-label="Look up">
+    <div class="ip-head">
+      <span class="ip-title" id="lookup-word"></span>
+      <button class="icon-btn ip-close" data-close-pop title="Close"><svg class="ic"><use href="#i-close"/></svg></button>
+    </div>
+    <div id="lookup-body"></div>
+    <div id="lookup-links" class="lk-links"></div>
+  </div>
+
+  <!-- go to page -->
+  <form id="goto-pop" class="popover" hidden autocomplete="off">
+    <label for="goto-input">Go to page</label>
+    <div class="goto-row">
+      <input id="goto-input" inputmode="numeric" aria-describedby="goto-of">
+      <span id="goto-of"></span>
+      <button class="btn primary" type="submit">Go</button>
+    </div>
+    <div id="goto-note"></div>
+  </form>
 
   <!-- note editor -->
   <div id="note-editor" class="popover" hidden role="dialog" aria-label="Note">
@@ -249,8 +313,154 @@
 <div id="drop-overlay"><div>Drop books to open</div></div>
 <div id="toasts" aria-live="polite"></div>
 
+<dialog id="edit-dialog" aria-labelledby="ed-heading">
+  <form id="edit-form" method="dialog" autocomplete="off">
+    <h2 id="ed-heading">Edit book details</h2>
+    <div class="ed-grid">
+      <div class="ed-cover-col">
+        <div id="ed-cover" class="ed-cover" title="Drop an image here">
+          <img id="ed-cover-img" alt="">
+          <span id="ed-cover-empty">No cover</span>
+        </div>
+        <button type="button" class="btn ghost small" id="ed-choose">Choose image…</button>
+      </div>
+      <div class="ed-fields">
+        <label class="ed-label">Title<input id="ed-title" required maxlength="300"></label>
+        <label class="ed-label">Author<input id="ed-author" maxlength="300"></label>
+        <p class="ed-hint">To change the cover, choose an image, drop one on the cover, or paste one with Ctrl+V.</p>
+        <button type="button" class="btn ghost small ed-find" id="ed-find"><svg class="ic"><use href="#i-search"/></svg><span>Find title, author and cover online</span></button>
+        <button type="button" class="ed-restore" id="ed-restore">Restore the book’s own title, author and cover</button>
+        <p class="ed-file" id="ed-file"></p>
+      </div>
+    </div>
+    <section id="ed-search" class="ed-search" hidden aria-label="Suggestions">
+      <div class="eds-bar">
+        <input id="eds-query" type="search" placeholder="Title and author" aria-label="Search for this book">
+        <button type="button" class="btn primary small" id="eds-go">Search</button>
+      </div>
+      <div id="eds-status" class="eds-status" role="status"></div>
+      <div id="eds-results" class="eds-results"></div>
+    </section>
+    <div class="ed-actions">
+      <button type="button" class="btn ghost" id="ed-cancel">Cancel</button>
+      <button type="submit" class="btn primary" id="ed-save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="stats-dialog" aria-labelledby="stats-heading" tabindex="-1">
+  <div class="sd-head">
+    <h2 id="stats-heading">Reading stats</h2>
+    <button type="button" class="icon-btn" id="stats-close" title="Close (Esc)" aria-label="Close"><svg class="ic"><use href="#i-close"/></svg></button>
+  </div>
+  <section class="st-goals" id="st-goals" aria-label="Reading goals"></section>
+  <div id="stats" class="stats">
+    <div class="st-tiles" id="st-tiles"></div>
+    <div class="st-chart">
+      <div class="st-chart-head"><span>Reading time, last 14 days</span><span id="st-peak"></span></div>
+      <div class="st-bars" id="st-bars" role="img"></div>
+      <div class="st-axis"><span id="st-first"></span><span>Today</span></div>
+      <div class="st-tip" id="st-tip" hidden></div>
+      <table class="sr-only" id="st-table"><caption>Minutes read per day</caption><thead><tr><th>Day</th><th>Time read</th><th>Pages</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+  <p class="sd-note">Time counts while a book is open and you're turning pages; breaks over 5 minutes don't count.</p>
+</dialog>
+
+<dialog id="backup-dialog" aria-labelledby="bk-heading" tabindex="-1">
+  <div class="sd-head">
+    <h2 id="bk-heading">Backup &amp; restore</h2>
+    <button type="button" class="icon-btn" id="bk-close" title="Close (Esc)" aria-label="Close"><svg class="ic"><use href="#i-close"/></svg></button>
+  </div>
+  <section class="bk-sec">
+    <h3>Back up</h3>
+    <p>Saves everything in one .zip file: your books, reading progress, highlights and notes, bookmarks, collections, covers, reading stats and settings.</p>
+    <div class="bk-row">
+      <button type="button" class="btn primary" id="bk-create">Back up now…</button>
+      <span class="bk-meta" id="bk-last"></span>
+    </div>
+  </section>
+  <section class="bk-sec">
+    <h3>Automatic backup</h3>
+    <label class="bk-check"><input type="checkbox" id="bk-auto"><span>Back up every week to a folder</span></label>
+    <div class="bk-row">
+      <button type="button" class="btn ghost small" id="bk-folder">Choose folder…</button>
+      <button type="button" class="bk-path" id="bk-folder-path" title="Open this folder"></button>
+    </div>
+    <p class="bk-hint" id="bk-auto-note">Choose a OneDrive or Dropbox folder to keep a copy off this computer. The 5 newest automatic backups are kept.</p>
+  </section>
+  <section class="bk-sec">
+    <h3>Restore</h3>
+    <p>Replaces your current library with the one in a backup file. Your current library is saved first, so you can go back to it.</p>
+    <div class="bk-row">
+      <button type="button" class="btn ghost" id="bk-restore">Restore from backup…</button>
+      <button type="button" class="bk-link" id="bk-safety">Copies saved before a restore</button>
+    </div>
+  </section>
+  <div class="bk-status" id="bk-status" role="status"></div>
+</dialog>
+
+<dialog id="info-dialog" aria-labelledby="info-title" tabindex="-1">
+  <button type="button" class="icon-btn" id="info-close" title="Close (Esc)" aria-label="Close"><svg class="ic"><use href="#i-close"/></svg></button>
+  <div class="info-head">
+    <div id="info-cover"></div>
+    <div class="info-id">
+      <h2 id="info-title"></h2>
+      <div id="info-author"></div>
+      <div id="info-sub"></div>
+      <div id="info-progress"></div>
+    </div>
+  </div>
+  <div id="info-stats"></div>
+  <dl id="info-details"></dl>
+  <div id="info-desc"></div>
+  <div class="info-actions">
+    <button type="button" class="btn ghost" id="info-edit">Edit details…</button>
+    <button type="button" class="btn primary" id="info-open">Read</button>
+  </div>
+</dialog>
+
+<dialog id="img-viewer" aria-label="Picture" tabindex="-1">
+  <div id="iv-stage"><img id="iv-img" alt="" draggable="false"></div>
+  <p id="iv-caption"></p>
+  <div class="iv-bar">
+    <button type="button" class="iv-btn" id="iv-out" title="Zoom out (−)" aria-label="Zoom out">−</button>
+    <button type="button" class="iv-btn" id="iv-pct" title="Fit to screen (0)">100%</button>
+    <button type="button" class="iv-btn" id="iv-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+    <span class="iv-sep"></span>
+    <button type="button" class="iv-btn" id="iv-close" title="Close (Esc)" aria-label="Close"><svg class="ic"><use href="#i-close"/></svg></button>
+  </div>
+</dialog>
+
+<div id="coll-pop" class="popover" hidden role="dialog" aria-label="Collections">
+  <div class="cp-title" id="cp-title">Collections</div>
+  <div class="cp-list" id="cp-list"></div>
+  <div class="cp-new">
+    <input id="cp-input" placeholder="New collection…" maxlength="60" autocomplete="off" aria-label="New collection name">
+    <button type="button" class="btn primary small" id="cp-add">Add</button>
+  </div>
+</div>
+
+<div id="chip-menu" class="popover menu" hidden>
+  <button data-chip="rename">Rename…</button>
+  <button data-chip="delete" class="danger">Delete collection</button>
+</div>
+
+<div id="theme-pop" class="popover" hidden role="dialog" aria-label="Theme">
+  <div class="tp-title">Theme</div>
+  <div class="tp-row" role="radiogroup" aria-label="Theme">
+    <button data-theme-btn="light" class="tp-opt"><span class="swatch light">Aa</span><span>Light</span></button>
+    <button data-theme-btn="sepia" class="tp-opt"><span class="swatch sepia">Aa</span><span>Sepia</span></button>
+    <button data-theme-btn="dark" class="tp-opt"><span class="swatch dark">Aa</span><span>Dark</span></button>
+    <button data-theme-btn="black" class="tp-opt"><span class="swatch black">Aa</span><span>Black</span></button>
+  </div>
+</div>
+
 <div id="card-menu" class="popover menu" hidden>
   <button data-cm="open">Open</button>
+  <button data-cm="info">Book info</button>
+  <button data-cm="edit">Edit details…</button>
+  <button data-cm="collections">Collections…</button>
   <button data-cm="folder">Show in folder</button>
   <button data-cm="reset">Mark as unread</button>
   <button data-cm="remove" class="danger">Remove from library</button>

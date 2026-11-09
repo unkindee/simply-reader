@@ -67,8 +67,10 @@ const render = async (page, doc, zoom) => {
 }
 
 const renderPage = async (page, getImageBlob) => {
-    const viewport = page.getViewport({ scale: 1 })
+    let viewport = page.getViewport({ scale: 1 })
     if (getImageBlob) {
+        // cover image: render large enough for a sharp ~800px-wide library cover
+        viewport = page.getViewport({ scale: Math.min(4, Math.max(1, 800 / viewport.width)) })
         const canvas = document.createElement('canvas')
         canvas.height = viewport.height
         canvas.width = viewport.width
@@ -156,7 +158,7 @@ export const makePDF = async file => {
             cache.set(i, url)
             return url
         },
-        // (Inkleaf patch) plain-text version of the page so in-book search works for PDFs
+        // (Simply Reader patch) plain-text version of the page so in-book search works for PDFs
         createDocument: async () => {
             const page = await pdf.getPage(i + 1)
             const { items } = await page.getTextContent()

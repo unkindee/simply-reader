@@ -1,6 +1,6 @@
 {
-  "name": "inkleaf-reader",
-  "productName": "Inkleaf Reader",
+  "name": "simply-reader",
+  "productName": "Simply Reader",
   "version": "1.0.0",
   "description": "A desktop e-book reader for EPUB, MOBI, AZW3, FB2 and CBZ",
   "main": "src/main.js",
@@ -12,8 +12,8 @@
     "dist": "electron-builder --win nsis portable"
   },
   "build": {
-    "appId": "com.inkleaf.reader",
-    "productName": "Inkleaf Reader",
+    "appId": "com.simplyreader.app",
+    "productName": "Simply Reader",
     "files": [
       "src/**/*",
       "vendor/foliate-js/**/*",
@@ -36,7 +36,7 @@
       "allowToChangeInstallationDirectory": true
     },
     "portable": {
-      "artifactName": "InkleafReader-Portable-${version}.exe"
+      "artifactName": "SimplyReader-Portable-${version}.exe"
     },
     "fileAssociations": [
       {

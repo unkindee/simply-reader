@@ -1,2 +1,30 @@
 node_modules/
 dist/
+
+# never commit books, backups or library data
+*.epub
+*.mobi
+*.azw
+*.azw3
+*.kf8
+*.prc
+*.fb2
+*.fbz
+*.cbz
+*.cbr
+*.pdf
+*.zip
+library.json
+stats.json
+books/
+covers/
+backups/
+
+# local and editor files
+.env
+.env.*
+*.log
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
