@@ -45,10 +45,10 @@ Download from the **[Releases page](https://github.com/unkindee/simply-reader/re
 
 | File | What it does |
 |---|---|
-| `SimplyReader-Setup-1.0.0.exe` | Installs the app, adds a Start-menu entry, and registers it as the "Open with" app for e-book files. You can choose the install folder. |
-| `SimplyReader-Portable-1.0.0.exe` | Runs without installing. Your library is still kept in `%APPDATA%\Simply Reader`. |
+| `SimplyReader-Setup-<version>.exe` | Installs the app, adds a Start-menu entry, and registers it as the "Open with" app for e-book files. You can choose the install folder. Installing a newer version over an older one keeps your library. |
+| `SimplyReader-Portable-<version>.exe` | Runs without installing. Your library is still kept in `%APPDATA%\Simply Reader`. |
 
-The app isn't code-signed yet, so Windows SmartScreen may warn the first time you run it: click **More info → Run anyway**. When you build from source, the same files appear in `dist/` (the installer is named `Simply Reader Setup 1.0.0.exe` there).
+The app isn't code-signed yet, so Windows SmartScreen may warn the first time you run it: click **More info → Run anyway**. When you build from source, the same files appear in `dist/` (the installer is named `Simply Reader Setup <version>.exe` there).
 
 Double-clicking a book while Simply Reader is already open opens it in the same window.
 

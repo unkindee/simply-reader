@@ -15,8 +15,10 @@ Simply Reader is a Windows desktop e-book reader built with **Electron 45**:
 ```
 npm install
 npm start        # electron .
-npm run dist     # electron-builder --win nsis portable → dist/Simply Reader Setup 1.0.0.exe, dist/SimplyReader-Portable-1.0.0.exe
+npm run dist     # electron-builder --win nsis portable → dist/Simply Reader Setup <version>.exe, dist/SimplyReader-Portable-<version>.exe
 ```
+
+**Releasing a new version:** `npm version <x.y.z> --no-git-tag-version` (updates package.json and package-lock.json) → close the app → `npm run dist` → commit and push → annotated tag `v<x.y.z>` → `gh release create` with the two exes renamed to `SimplyReader-Setup-<x.y.z>.exe` / `SimplyReader-Portable-<x.y.z>.exe` (GitHub turns spaces into dots) plus a `SHA256SUMS.txt`. Old releases stay as they were. Commits and tags use the GitHub noreply email set in this repo's git config; never the user's personal address.
 
 - `npm run dist` fails or hangs if Simply Reader (installed or portable) is running, because it locks files. Ask the user to close it first. If electron-builder is left hanging, kill its processes.
 - There's no test suite or linter. Verify changes by driving the real app (see [Testing](#testing)).

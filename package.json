@@ -1,7 +1,7 @@
 {
   "name": "simply-reader",
   "productName": "Simply Reader",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A desktop e-book reader for EPUB, MOBI, AZW3, FB2 and CBZ",
   "main": "src/main.js",
   "author": "drago",

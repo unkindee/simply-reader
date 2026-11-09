@@ -20,6 +20,9 @@ books/
 covers/
 backups/
 
+# kept locally, not published
+docs/landing-page.html
+
 # local and editor files
 .env
 .env.*
