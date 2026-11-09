@@ -2,6 +2,11 @@
 
 A calm, fast desktop e-book reader for Windows. It opens **EPUB, MOBI, AZW3/AZW, KF8/PRC, FB2/FBZ, CBZ and PDF** files, keeps your library in one place, and remembers where you stopped in every book.
 
+**[Download the latest version](https://github.com/unkindee/simply-reader/releases/latest)**: an installer, or a portable `.exe` that runs without installing.
+
+![The Simply Reader library: covers, Continue reading and reading goals](docs/screenshots/library.png)
+
+- [Screenshots](#screenshots)
 - [Install](#install)
 - [Features](#features)
   - [Your library](#your-library)
@@ -17,12 +22,33 @@ A calm, fast desktop e-book reader for Windows. It opens **EPUB, MOBI, AZW3/AZW,
 - [Run from source](#run-from-source)
 - [Credits](#credits)
 
+## Screenshots
+
+*The books shown are public-domain classics from [Standard Ebooks](https://standardebooks.org).*
+
+| | |
+|---|---|
+| ![Two-page reading view in the sepia theme, with page numbers and time left](docs/screenshots/reader.png) | ![Highlights in two colours and the selection pop-up, in the dark theme](docs/screenshots/highlights.png) |
+| **Reading**: two pages side by side, real page numbers, and time left based on your reading speed | **Highlights and notes**: four colours, plus Copy, Look up and Search on any selection |
+| ![Dictionary pop-up for the word “ungracious”](docs/screenshots/lookup.png) | ![Reader settings with the per-book settings note](docs/screenshots/settings.png) |
+| **Look up**: dictionary definitions and Wikipedia, right next to the text | **Settings**: themes, fonts and layout, remembered per book |
+| ![Bookshelf view with book spines on a wooden shelf](docs/screenshots/bookshelf.png) | ![List view with collections, progress and last read](docs/screenshots/list.png) |
+| **Bookshelf view**: spines coloured from each cover | **List view**: details at a glance, with multi-select |
+| ![Reading stats with daily and yearly goal rings and a 14-day chart](docs/screenshots/stats.png) | ![Book info for Dracula: pages, words, time spent and description](docs/screenshots/book-info.png) |
+| **Reading stats and goals**: progress rings and a 14-day chart | **Book info**: description, details, length and your time spent |
+| ![Table of contents drawer with the current chapter marked](docs/screenshots/contents.png) | |
+| **Contents**: chapters, bookmarks and notes in one drawer | |
+
 ## Install
+
+Download from the **[Releases page](https://github.com/unkindee/simply-reader/releases/latest)**:
 
 | File | What it does |
 |---|---|
-| `dist/Simply Reader Setup 1.0.0.exe` | Installs the app, adds a Start-menu entry, and registers it as the "Open with" app for e-book files. You can choose the install folder. |
-| `dist/SimplyReader-Portable-1.0.0.exe` | Runs without installing. Your library is still kept in `%APPDATA%\Simply Reader`. |
+| `SimplyReader-Setup-1.0.0.exe` | Installs the app, adds a Start-menu entry, and registers it as the "Open with" app for e-book files. You can choose the install folder. |
+| `SimplyReader-Portable-1.0.0.exe` | Runs without installing. Your library is still kept in `%APPDATA%\Simply Reader`. |
+
+The app isn't code-signed yet, so Windows SmartScreen may warn the first time you run it: click **More info → Run anyway**. When you build from source, the same files appear in `dist/` (the installer is named `Simply Reader Setup 1.0.0.exe` there).
 
 Double-clicking a book while Simply Reader is already open opens it in the same window.
 

@@ -34,7 +34,8 @@ npm run dist     # electron-builder --win nsis portable → dist/Simply Reader S
 | `src/renderer/styles.css` | All styles. Theme tokens are on `body[data-theme=…]`; newer features append their own block at the end |
 | `src/renderer/fonts/` | Atkinson Hyperlegible (OFL) |
 | `vendor/foliate-js/` | Third-party engine, with three small local patches (see [Vendor patches](#vendor-patches)) |
-| `dist/` | Build output (exes, `win-unpacked/`) |
+| `dist/` | Build output (exes, `win-unpacked/`). Git-ignored; releases are published on GitHub as `SimplyReader-Setup-<version>.exe` and `SimplyReader-Portable-<version>.exe` |
+| `docs/screenshots/` | README screenshots, taken at 1440×900 from a sandbox library of public-domain Standard Ebooks titles. Never use the user's own books or data for them |
 
 ## Process model and security
 
