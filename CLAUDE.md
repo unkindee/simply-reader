@@ -26,9 +26,10 @@ npm run dist     # electron-builder --win nsis portable → dist/Simply Reader S
 
 | Path | Role |
 |---|---|
-| `src/main.js` (~760 lines) | Main process: window, `app://` protocol, CSP, all disk I/O (library, settings, stats, covers, stored books), backup/restore, network look-ups, IPC handlers |
+| `src/main.js` (~900 lines) | Main process: window, `app://` protocol, CSP, all disk I/O (library, settings, stats, covers, stored books), backup/restore, network look-ups, IPC handlers |
 | `src/preload.js` | `contextBridge` exposing `window.api` (the only bridge between renderer and main) |
-| `src/zip.js` | Dependency-free zip writer/reader used by backups (`writeZip(dest, entries)`, `readZip(file)` → `Map<name, Buffer>`; CRC-checked, UTF-8 names, stores already-compressed files and deflates the rest) |
+| `src/zip.js` | Dependency-free zip writer/reader used by backups: `writeZip(dest, entries)` and `openZip(file)` → `{ names, has, read(name), extract(name, destFile) }`. Files are streamed in and out (a backup never has to fit in memory) and ZIP64 records are written past 4 GB or 65,535 files. CRC-checked, UTF-8 names, stores already-compressed files and deflates the rest |
+| `src/files.js` | `rename()` that retries for a few seconds when Windows (antivirus, indexing, OneDrive) briefly locks a file |
 | `src/renderer/index.html` | All markup: library, reader, popovers, `<dialog>`s, and the inline SVG icon sprite (`<symbol id="i-…">`) |
 | `src/renderer/app.js` (~3,650 lines) | All renderer logic, split into commented sections (see below) |
 | `src/renderer/styles.css` | All styles. Theme tokens are on `body[data-theme=…]`; newer features append their own block at the end |
@@ -47,7 +48,8 @@ npm run dist     # electron-builder --win nsis portable → dist/Simply Reader S
   - Apple iTunes Search and Open Library (`search-book-info`).
   - Cover images only from `is\d+-ssl.mzstatic.com` and `covers.openlibrary.org` (`fetch-cover-image`).
   - All of them use the User-Agent `SimplyReader/1.0 (desktop e-book reader; Electron)`. Never put the user's email or other personal data in requests.
-- **Path checks:** `assertBookPath()` guards every IPC that takes a book path: it rejects unsupported extensions and resolves the path.
+- **Path checks:** `assertBookPath()` guards every IPC that takes a book path: it rejects unsupported extensions and resolves the path. The `app://` handler serves only files inside `APP_ROOT` (checked with `path.relative`, not a string prefix).
+- **Permissions:** the session refuses every browser permission except `clipboard-sanitized-write` (Copy in the selection pop-up). Add a permission to `ALLOWED_PERMISSIONS` only if a feature needs it.
 - **Single instance:** a second launch sends `open-files` to the existing window. Files passed on the command line at start are read by the renderer through `get-pending-files`.
 
 ## IPC surface (`window.api`)
@@ -58,7 +60,7 @@ npm run dist     # electron-builder --win nsis portable → dist/Simply Reader S
 | `readBook(path)` | `read-book` | Returns `{ name, data }`. The renderer wraps it in a `File` and calls foliate's `makeBook` |
 | `storeBooks(paths)` | `store-books` | Copies each book into `books/` and returns the stored paths. A byte-identical existing copy is reused; a different file with the same name becomes `name (2).epub`. Copies go through a `.part` temp file and are queued per name |
 | `bookId(path)` | `book-id` | See [Ids](#ids) |
-| `library.get / upsert(path, data) / remove(id)` | `library-*` | `upsert` only copies **allowed fields** (list in main.js); a JPEG data-URL `cover` is written to `covers/<id>.jpg` and replaced by its `app://` URL. `remove` deletes the stored copy (only if it's inside `books/`) and the cover file |
+| `library.get / upsert(path, data) / remove(id)` | `library-*` | `upsert` only copies **allowed fields** (list in main.js) and won't create an entry for a file that doesn't exist; a JPEG data-URL `cover` is written to `covers/<id>.jpg` and replaced by its `app://` URL. `remove` deletes the stored copy (only if it's inside `books/`) and the cover file, but only after `library.json` was saved (otherwise it rejects and keeps both) |
 | `settings.get / set` | `settings-*` | Reads and writes `settings.reader` (the renderer's default settings `G`) |
 | `goals.get / set` | `goals-*` | `{ dailyMinutes, yearBooks }`, integers or null, sanitized by `cleanGoals` |
 | `stats.get / add({ day, bookId, ms, pages })` | `stats-*` | `add` is clamped (≤ 6 h, ≤ 10,000 pages per call) |
@@ -73,7 +75,8 @@ npm run dist     # electron-builder --win nsis portable → dist/Simply Reader S
 - **`library.json`**: `{ books: { [id]: entry } }`. Rewritten on every position save, so keep big data out of it (covers are files).
 - **`settings.json`**: `{ reader: G, goals, backup: { auto, folder, lastAt, lastPath, lastAutoAt, lastError }, windowBounds, windowMaximized }`.
 - **`stats.json`**: `{ days: { 'YYYY-MM-DD': { ms, pages } }, books: { [id]: ms } }`.
-- **`books/`**: stored copies. **`covers/<id>.jpg`**: covers, up to 800 px wide. **`backups/`**: automatic "Before restore …zip" safety copies.
+- **`books/`**: stored copies. **`covers/<id>.jpg`**: covers, up to 800 px wide. **`backups/`**: automatic "Before restore …zip" safety copies. **`restore-staging/`, `restore-replaced/`, `restore-journal.json`** exist only while a restore runs (see [Backup and restore](#backup-and-restore)).
+- **Writes:** `writeJSON(file, data)` serializes and coalesces writes per file (temp file + rename) and its promise rejects when the write fails. Use it where a failure must stop the operation (restore, remove); `saveJSON` only logs the failure, as most saves did before.
 - **Renderer `localStorage`** (per-machine view choices, also carried in backups as `prefs.json`): `libMode` (`covers|shelf|list`), `libFilter` (`all|reading|unread|finished|c:<collection>`), `sort`, `readingSpeed` (`{ size, ms }`). **`sessionStorage.restored`** holds the toast text shown after a restore reloads the window.
 
 ### Library entry fields
@@ -87,7 +90,7 @@ Every key the renderer may write must be in main's `allowed` list in `library-up
 | `title`, `author`, `format`, `length` | From the book. `length` = the sum of section sizes in foliate "size units", used for time estimates and shelf thickness |
 | `custom: { title, author }`, `customCover` | The user's edits; they win over file metadata on reopen |
 | `cover`, `coverRes`, `spineColor` | Cover URL, its resolution (old low-res covers are upgraded by `upgradeCovers`), and the shelf spine colour |
-| `cfi`, `fraction`, `chapter`, `lastOpened`, `finishedAt` | Reading position and state. "Finished" = `fraction ≥ 0.995` (`FINISHED`) |
+| `cfi`, `fraction`, `chapter`, `lastOpened`, `finishedAt` | Reading position and state. "Finished" = `fraction ≥ 0.995` (`FINISHED`). `finishedAt` (which the yearly goal counts) is set only when that point is reached by a forward page turn, not by a jump (End, the slider, the contents, a search result) |
 | `annotations: [{ value: cfi, color, note, created, … }]`, `bookmarks: [{ cfi, label, created }]` | |
 | `collections: string[]` | |
 | `pagination: { key, pages: number[] }` | Cached page counts per section for one layout key |
@@ -189,15 +192,17 @@ The current view is captured through `api.capture(rect)`, overlaid as an image, 
 ## Backup and restore (`src/main.js`)
 
 - **Zip layout:** `manifest.json` (`{ app: 'Simply Reader', format: 1, created, books: { [id]: zipFileName } }`), `library.json`, `stats.json`, `settings.json` (`{ reader, goals }`), `prefs.json` (renderer localStorage view prefs), `books/<file>`, `covers/<id>.jpg`.
-- **`createBackup(dest)`** snapshots the library. Books whose file is missing keep their entry without a file.
+- **`createBackup(dest)`** snapshots the library. Books whose file is missing keep their entry without a file. Books are streamed into the zip, so there's no size limit.
+- **One job at a time:** `exclusive(job)` queues backups and restores (the weekly timer, "Back up now", "Restore"), so no job reads files another one is writing or deleting.
 - **`restoreBackup(file)`:**
-  1. Validates the zip (only whitelisted names; `backupFileOk`).
+  1. Opens the zip by reading only its index (`openZip`), and reads the JSON files from it.
   2. Saves a safety backup to `backups/Before restore <date time>.zip`, but only if the current library has books. With an empty library the renderer also skips the confirmation. The header backup button is always visible and the empty-library screen has a "Restore a backup" button, so a fresh install can restore.
-  3. Writes the books into `books/` and re-keys every entry by its new path, along with its cover and per-book stats.
-  4. Deletes stored books and covers that belonged only to the replaced library.
-  5. Replaces `library`, `stats`, `settings.reader` and `settings.goals`.
-  6. The renderer then restores `prefs.json` into localStorage and calls `location.reload()`.
-- **Automatic backup:** `autoBackupIfDue()` runs 60 s after start and every 6 h, at most weekly, into `settings.backup.folder`. It keeps the 5 newest files named `Simply Reader auto-backup YYYY-MM-DD.zip` and never touches other files.
+  3. `stageRestore` extracts the books and covers into `restore-staging/` (checking every CRC; names validated by `backupFileOk`), re-keys every entry by its new path along with its cover and per-book stats, and writes the new JSON files there too. Any failure up to here (a damaged backup, a full disk) leaves the library untouched: the error ends with "Your library wasn't changed."
+  4. Writes `restore-journal.json`, then `swapInStaged` moves `books/` and `covers/` to `restore-replaced/` and the staged folders into their place. If that fails, `swapBack` undoes it.
+  5. Replaces `library`, `stats`, `settings.reader` and `settings.goals` in memory and writes them, then deletes the journal and both folders (what was replaced is in the safety copy).
+  6. The renderer then restores `prefs.json` into localStorage and calls `location.reload()`. While a restore runs (`restoring`), the renderer's background cover upgrade stops.
+- **Interrupted restore:** `finishInterruptedRestore()` runs before anything reads the data folder (`ready()`). If the journal exists, it finishes the swap and moves the staged JSON files into place; otherwise it deletes leftover `restore-staging/` and `restore-replaced/` folders.
+- **Automatic backup:** `autoBackupIfDue()` runs 60 s after start and every 6 h, at most weekly, into `settings.backup.folder`. It keeps the 5 newest files named `Simply Reader auto-backup YYYY-MM-DD.zip` and never touches other files. The view choices it includes (`prefs.json`) are sent to main by `shareViewPrefs()` whenever one changes.
 - **When you add persistent data**, make sure it travels: library entry fields do automatically. A new `settings.json` key must be added to `createBackup` and `restoreBackup`. New files need zip entries.
 
 ## Vendor patches

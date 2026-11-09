@@ -1,9 +1,10 @@
 'use strict'
-const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, Menu } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, Menu, session } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs/promises')
 const crypto = require('node:crypto')
 const { pathToFileURL } = require('node:url')
+const files = require('./files')
 
 const SUPPORTED = ['.epub', '.mobi', '.azw3', '.azw', '.kf8', '.prc', '.fb2', '.fbz', '.cbz', '.pdf']
 const isSupported = p => SUPPORTED.includes(path.extname(p).toLowerCase())
@@ -70,21 +71,30 @@ const writers = new Map() // file -> { running, next, data }
 const writeJSON = (file, data) => {
   // serialize writes per file and coalesce bursts: calls made while a write is running
   // share one trailing write of the latest data. Temp file + rename so a crash never corrupts data.
+  // The promise rejects if the write fails; saveJSON is for callers that only log that.
   let w = writers.get(file)
   if (!w) writers.set(file, w = { running: Promise.resolve(), next: null, data: null })
   w.data = data
-  w.next ??= w.running.then(async () => {
+  w.next ??= w.running.catch(() => {}).then(async () => {
     w.next = null
     const tmp = file + '.tmp'
     await fs.writeFile(tmp, JSON.stringify(w.data))
-    await fs.rename(tmp, file)
-  }).catch(e => console.error('write failed', file, e))
+    await files.rename(tmp, file)
+  })
   return (w.running = w.next)
 }
+const logWriteError = file => e => console.error('write failed', file, e)
+const saveJSON = (file, data) => writeJSON(file, data).catch(logWriteError(file))
+
+// everything that reads the data folder waits for this first (see finishInterruptedRestore)
+let startup = null
+const ready = () => (startup ??= finishInterruptedRestore()
+  .catch(e => console.error('could not finish an interrupted restore', e)))
 
 let library = null // { books: { [id]: entry } }
 let libraryLoad = null
-const loadLibrary = () => (libraryLoad ??= readJSON(LIBRARY_FILE, { books: {} })
+const loadLibrary = () => (libraryLoad ??= ready()
+  .then(() => readJSON(LIBRARY_FILE, { books: {} }))
   .then(l => (library = l))
   .then(relocateLegacyPaths)
   .then(migrateToStoredBooks)
@@ -92,7 +102,7 @@ const loadLibrary = () => (libraryLoad ??= readJSON(LIBRARY_FILE, { books: {} })
 const saveLibrary = () => writeJSON(LIBRARY_FILE, library)
 let settings = null // kept in memory; settings.json is only written, never re-read
 let settingsLoad = null
-const loadSettings = () => (settingsLoad ??= readJSON(SETTINGS_FILE, {}).then(s => (settings = s)))
+const loadSettings = () => (settingsLoad ??= ready().then(() => readJSON(SETTINGS_FILE, {})).then(s => (settings = s)))
 const bookId = p => crypto.createHash('sha1').update(path.resolve(p).toLowerCase()).digest('hex').slice(0, 16)
 
 // ---------- stored book copies ----------
@@ -104,28 +114,35 @@ const sameFile = async (a, b) => {
   return sa.size === sb.size && await fileHash(a) === await fileHash(b)
 }
 // copy a book into BOOKS_DIR (or find its existing copy) and return the stored path
-const storeQueue = new Map() // destination name -> running store, so parallel calls don't race
+// Each destination name is claimed while it's checked and written, so parallel imports never
+// write the same file (e.g. two different "Book.epub" files and a "Book (2).epub").
+const claimedNames = new Map() // lower-case destination path -> promise that settles when it's free
 async function storeBook(src) {
   src = path.resolve(src)
   if (isStored(src)) return src
   await fs.mkdir(BOOKS_DIR, { recursive: true })
   const ext = path.extname(src), stem = path.basename(src, ext)
-  const key = path.basename(src).toLowerCase()
-  const prev = storeQueue.get(key) ?? Promise.resolve()
-  const run = prev.catch(() => {}).then(async () => {
-    for (let n = 1; ; n++) {
-      const dest = path.join(BOOKS_DIR, n === 1 ? stem + ext : `${stem} (${n})${ext}`)
+  for (let n = 1; ; n++) {
+    const dest = path.join(BOOKS_DIR, n === 1 ? stem + ext : `${stem} (${n})${ext}`)
+    const key = dest.toLowerCase()
+    while (claimedNames.has(key)) await claimedNames.get(key)
+    let release
+    claimedNames.set(key, new Promise(r => (release = r))) // no await between the check and the claim
+    try {
       if (!await exists(dest)) {
         const tmp = dest + '.part'
-        await fs.copyFile(src, tmp)
-        await fs.rename(tmp, dest)
+        try {
+          await fs.copyFile(src, tmp)
+          await files.rename(tmp, dest)
+        } catch (e) { await fs.rm(tmp, { force: true }); throw e }
         return dest
       }
       if (await sameFile(src, dest)) return dest // already stored
+    } finally {
+      claimedNames.delete(key)
+      release()
     }
-  })
-  storeQueue.set(key, run)
-  try { return await run } finally { if (storeQueue.get(key) === run) storeQueue.delete(key) }
+  }
 }
 
 // Books stored by "Inkleaf Reader" point into its old data folder. After that folder moved
@@ -152,14 +169,14 @@ async function relocateLegacyPaths() {
     moved.push([id, newId])
   }
   if (!moved.length) return
-  await saveLibrary()
+  await saveLibrary().catch(logWriteError(LIBRARY_FILE))
   await loadStats()
   for (const [from, to] of moved) {
     if (stats.books[from] == null) continue
     stats.books[to] = (stats.books[to] ?? 0) + stats.books[from]
     delete stats.books[from]
   }
-  await writeJSON(STATS_FILE, stats)
+  await saveJSON(STATS_FILE, stats)
 }
 
 // library entries from before books were stored: copy the file in and re-key the entry
@@ -184,7 +201,7 @@ async function migrateToStoredBooks() {
       changed = true
     } catch (e) { console.error('could not store', b.path, e) }
   }
-  if (changed) await saveLibrary()
+  if (changed) await saveLibrary().catch(logWriteError(LIBRARY_FILE))
 }
 
 // ---------- window ----------
@@ -226,7 +243,7 @@ const createWindow = async () => {
     const bounds = !maximized && !win.isFullScreen() ? win.getBounds() : null
     settings.windowMaximized = maximized
     if (bounds) settings.windowBounds = bounds
-    await writeJSON(SETTINGS_FILE, settings)
+    await saveJSON(SETTINGS_FILE, settings)
   }
   win.on('close', saveBounds)
 
@@ -282,7 +299,10 @@ if (!app.requestSingleInstanceLock()) {
         } catch { return new Response('Not found', { status: 404 }) }
       }
       const filePath = path.normalize(path.join(APP_ROOT, decodeURIComponent(pathname)))
-      if (!filePath.startsWith(APP_ROOT)) return new Response('Forbidden', { status: 403 })
+      // inside APP_ROOT only (a plain prefix test would also let through siblings such as
+      // "app.asar.unpacked" or "simply-reader-old")
+      const rel = path.relative(APP_ROOT, filePath)
+      if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) return new Response('Forbidden', { status: 403 })
       const res = await net.fetch(pathToFileURL(filePath).toString())
       if (filePath.endsWith('.html')) {
         const headers = new Headers(res.headers)
@@ -293,6 +313,11 @@ if (!app.requestSingleInstanceLock()) {
       return res
     })
     pendingOpen = filesFromArgv(process.argv)
+    // the window needs no browser permissions except writing to the clipboard (Copy in the
+    // selection pop-up); camera, location, notifications and the rest are refused
+    const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write'])
+    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => callback(ALLOWED_PERMISSIONS.has(permission)))
+    session.defaultSession.setPermissionCheckHandler((_wc, permission) => ALLOWED_PERMISSIONS.has(permission))
     loadLibrary() // start reading now; IPC handlers await the same promise
     await createWindow()
     // weekly automatic backup (if turned on): shortly after start, then every few hours
@@ -378,6 +403,9 @@ ipcMain.handle('library-upsert', async (_e, p, data) => {
   const file = assertBookPath(p)
   await loadLibrary()
   const id = bookId(file)
+  // never create an entry for a file that isn't there (e.g. a late save for a book that a
+  // restore has just replaced)
+  if (!library.books[id] && !await exists(file)) throw new Error('File not found')
   const prev = library.books[id] ?? { id, path: file, added: Date.now(), annotations: [], bookmarks: [] }
   // a new cover arrives as a JPEG data URL: store it as a file, keep only its URL
   if (typeof data.cover === 'string' && data.cover.startsWith('data:image/jpeg;base64,')) {
@@ -389,7 +417,7 @@ ipcMain.handle('library-upsert', async (_e, p, data) => {
   for (const k of allowed) if (k in data) prev[k] = data[k]
   prev.path = file
   library.books[id] = prev
-  await saveLibrary()
+  await saveLibrary().catch(logWriteError(LIBRARY_FILE))
   return prev
 })
 
@@ -397,7 +425,11 @@ ipcMain.handle('library-remove', async (_e, id) => {
   await loadLibrary()
   const removed = library.books[id]
   delete library.books[id]
-  await saveLibrary()
+  try { await saveLibrary() }
+  catch (e) { // the entry (and its stored copy) stay if the library couldn't be saved
+    if (removed) library.books[id] = removed
+    throw e
+  }
   // the stored copy belongs to the library: delete it with the entry (never the user's original)
   if (removed?.path && isStored(removed.path) && !Object.values(library.books).some(b => b.path === removed.path))
     await fs.rm(removed.path, { force: true })
@@ -492,7 +524,7 @@ ipcMain.handle('fetch-cover-image', async (_e, url) => {
 // { days: { 'YYYY-MM-DD': { ms, pages } }, books: { [bookId]: ms } }
 let stats = null
 let statsLoad = null
-const loadStats = () => (statsLoad ??= readJSON(STATS_FILE, {}).then(s => {
+const loadStats = () => (statsLoad ??= ready().then(() => readJSON(STATS_FILE, {})).then(s => {
   stats = { days: {}, books: {}, ...s }
   return stats
 }))
@@ -508,14 +540,14 @@ ipcMain.handle('stats-add', async (_e, add) => {
   d.pages += pages
   if (typeof add.bookId === 'string' && /^[0-9a-f]{16}$/.test(add.bookId))
     stats.books[add.bookId] = (stats.books[add.bookId] ?? 0) + ms
-  await writeJSON(STATS_FILE, stats)
+  await saveJSON(STATS_FILE, stats)
   return stats
 })
 
 // ---------- backup & restore ----------
 // A backup is one .zip: manifest.json, library.json, stats.json, settings.json (reading
 // settings), prefs.json (view choices kept by the window), books/<file> and covers/<id>.jpg.
-const { writeZip, readZip } = require('./zip')
+const { writeZip, openZip } = require('./zip')
 const BACKUPS_DIR = path.join(DATA_DIR, 'backups') // copies saved automatically before a restore
 const AUTO_EVERY = 7 * 24 * 3600e3
 const AUTO_KEEP = 5
@@ -525,6 +557,15 @@ const pad2 = n => String(n).padStart(2, '0')
 const ymd = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 const ymdhm = (d = new Date()) => `${ymd(d)} ${pad2(d.getHours())}.${pad2(d.getMinutes())}`
 const backupConfig = () => (settings.backup ??= {})
+
+// one backup or restore at a time: the weekly timer, "Back up now" and "Restore" never read
+// files that another job is writing or deleting (or write the same .part file)
+let backupJob = Promise.resolve()
+const exclusive = job => {
+  const run = backupJob.then(job)
+  backupJob = run.catch(() => {})
+  return run
+}
 
 async function createBackup(dest) {
   await Promise.all([loadLibrary(), loadStats(), loadSettings()])
@@ -561,40 +602,57 @@ const backupFileOk = n => /^(manifest|library|stats|settings|prefs)\.json$/.test
   || (/^books\/[^/\\:*?"<>|]+$/.test(n) && !n.includes('..') && isSupported(n))
 async function openBackup(file) {
   if (typeof file !== 'string' || !/\.zip$/i.test(file)) throw new Error('Choose a .zip backup file')
-  const files = await readZip(file)
-  const parse = n => { try { return files.has(n) ? JSON.parse(files.get(n).toString('utf8')) : null } catch { return null } }
-  const manifest = parse('manifest.json'), lib = parse('library.json')
+  const zip = await openZip(file) // reads only the archive's index; books are extracted one by one
+  // a damaged file throws; one that isn't valid JSON counts as missing
+  const parse = async n => {
+    if (!zip.has(n)) return null
+    const text = (await zip.read(n)).toString('utf8')
+    try { return JSON.parse(text) } catch { return null }
+  }
+  const [manifest, lib, statsData, settingsData, prefs] =
+    await Promise.all(['manifest', 'library', 'stats', 'settings', 'prefs'].map(n => parse(n + '.json')))
   if (manifest?.app !== 'Simply Reader' || !lib?.books || typeof lib.books !== 'object')
     throw new Error('This file is not a Simply Reader backup')
-  return { files, manifest, lib, stats: parse('stats.json'), settings: parse('settings.json'), prefs: parse('prefs.json') }
+  return { zip, manifest, lib, stats: statsData, settings: settingsData, prefs }
 }
 
-// replace the library with a backup; what was there is saved to BACKUPS_DIR first
-async function restoreBackup(file) {
-  const bk = await openBackup(file)
-  await Promise.all([loadLibrary(), loadStats(), loadSettings()])
-  // keep what's being replaced (an empty library has nothing worth keeping)
-  const safety = Object.keys(library.books ?? {}).length
-    ? await createBackup(path.join(BACKUPS_DIR, `Before restore ${ymdhm()}.zip`)) : null
-  await fs.mkdir(BOOKS_DIR, { recursive: true })
-  await fs.mkdir(COVERS_DIR, { recursive: true })
-  const books = {}
-  const idMap = new Map()
+// A restore first unpacks the backup into STAGING_DIR, so a damaged backup or a full disk
+// leaves the library as it was. Then the staged books and covers swap places with the
+// library's (which move to REPLACED_DIR) and the JSON files are written. RESTORE_JOURNAL
+// exists during the swap: if the app stops half-way, the next start completes it.
+const STAGING_DIR = path.join(DATA_DIR, 'restore-staging')
+const REPLACED_DIR = path.join(DATA_DIR, 'restore-replaced')
+const RESTORE_JOURNAL = path.join(DATA_DIR, 'restore-journal.json')
+const SWAPPED_DIRS = ['books', 'covers'] // BOOKS_DIR and COVERS_DIR
+const STAGED_JSON = ['library.json', 'stats.json', 'settings.json']
+const rmDir = dir => fs.rm(dir, { recursive: true, force: true, maxRetries: 3 })
+const writeFileAtomic = async (file, text) => { await fs.writeFile(file + '.tmp', text); await files.rename(file + '.tmp', file) }
+const unchanged = e => new Error(`${e.code === 'ENOSPC' ? 'There isn’t enough free disk space to restore this backup'
+  : String(e.message).replace(/\.$/, '')}. Your library wasn’t changed.`, { cause: e })
+
+// unpack a backup next to the library without touching it; returns what the library becomes
+async function stageRestore(bk) {
+  await Promise.all([rmDir(STAGING_DIR), rmDir(REPLACED_DIR)])
+  const stagedBooks = path.join(STAGING_DIR, 'books'), stagedCovers = path.join(STAGING_DIR, 'covers')
+  await fs.mkdir(stagedBooks, { recursive: true })
+  await fs.mkdir(stagedCovers, { recursive: true })
+  const books = {}, idMap = new Map(), staged = new Set(), keep = new Set()
   for (const [oldId, entry] of Object.entries(bk.lib.books)) {
     if (!entry || typeof entry !== 'object') continue
     const zipName = bk.manifest.books?.[oldId]
     let p = entry.path
-    if (typeof zipName === 'string' && backupFileOk('books/' + zipName) && bk.files.has('books/' + zipName)) {
+    if (typeof zipName === 'string' && backupFileOk('books/' + zipName) && bk.zip.has('books/' + zipName)) {
       p = path.join(BOOKS_DIR, zipName) // books live in this computer's library folder
-      await fs.writeFile(p, bk.files.get('books/' + zipName))
-    }
+      await bk.zip.extract('books/' + zipName, path.join(stagedBooks, zipName))
+      staged.add(zipName.toLowerCase())
+    } else if (typeof p === 'string' && p && isStored(p)) keep.add(path.basename(p)) // not in the backup: keep this computer's copy, if any
     if (typeof p !== 'string' || !p) continue
     const id = bookId(p)
     const e = { ...entry, id, path: p }
     delete e.missing
-    const cover = /^[0-9a-f]{16}$/.test(oldId) ? bk.files.get(`covers/${oldId}.jpg`) : null
-    if (cover) {
-      await fs.writeFile(path.join(COVERS_DIR, id + '.jpg'), cover)
+    const cover = `covers/${oldId}.jpg`
+    if (/^[0-9a-f]{16}$/.test(oldId) && bk.zip.has(cover)) {
+      await bk.zip.extract(cover, path.join(stagedCovers, id + '.jpg'))
       e.cover = `app://reader${COVERS_ROUTE}${id}.jpg?v=${Date.now()}`
     } else if (typeof e.cover === 'string' && e.cover.includes(COVERS_ROUTE)) {
       delete e.cover; delete e.coverRes // made again from the book
@@ -602,27 +660,121 @@ async function restoreBackup(file) {
     books[id] = e
     idMap.set(oldId, id)
   }
-  // stored books and covers that belonged only to the replaced library (they're in the safety copy)
-  const keepBooks = new Set(Object.values(books).map(b => path.resolve(b.path).toLowerCase()))
-  for (const f of await fs.readdir(BOOKS_DIR))
-    if (!keepBooks.has(path.join(BOOKS_DIR, f).toLowerCase())) await fs.rm(path.join(BOOKS_DIR, f), { force: true })
-  for (const f of await fs.readdir(COVERS_DIR))
-    if (!books[path.basename(f, '.jpg')]) await fs.rm(path.join(COVERS_DIR, f), { force: true })
-
   const statBooks = {}
   for (const [oldId, ms] of Object.entries(bk.stats?.books ?? {}))
     if (idMap.has(oldId) && Number.isFinite(ms)) statBooks[idMap.get(oldId)] = ms
-  library = { ...bk.lib, books }
-  stats = { days: bk.stats?.days && typeof bk.stats.days === 'object' ? bk.stats.days : {}, books: statBooks }
-  if (bk.settings?.reader && typeof bk.settings.reader === 'object') settings.reader = bk.settings.reader
-  if (bk.settings?.goals && typeof bk.settings.goals === 'object') settings.goals = cleanGoals(bk.settings.goals)
-  await saveLibrary()
-  await writeJSON(STATS_FILE, stats)
-  await writeJSON(SETTINGS_FILE, settings)
-  return { books: Object.keys(books).length, prefs: bk.prefs, safety: safety?.path ?? null }
+  const next = {
+    library: { ...bk.lib, books },
+    stats: { days: bk.stats?.days && typeof bk.stats.days === 'object' ? bk.stats.days : {}, books: statBooks },
+    reader: bk.settings?.reader && typeof bk.settings.reader === 'object' ? bk.settings.reader : settings.reader,
+    goals: bk.settings?.goals && typeof bk.settings.goals === 'object' ? cleanGoals(bk.settings.goals) : settings.goals,
+    keep: [...keep].filter(n => !staged.has(n.toLowerCase())),
+  }
+  // what the next start writes if the app stops before the restore is complete
+  await fs.writeFile(path.join(STAGING_DIR, 'library.json'), JSON.stringify(next.library))
+  await fs.writeFile(path.join(STAGING_DIR, 'stats.json'), JSON.stringify(next.stats))
+  await fs.writeFile(path.join(STAGING_DIR, 'settings.json'), JSON.stringify({ ...settings, reader: next.reader, goals: next.goals }))
+  return next
 }
 
-async function autoBackupIfDue(force) {
+// Put the staged books and covers in place of the library's. Every step checks what's
+// already done, so it can run again after an interruption.
+async function swapInStaged(keep) {
+  await fs.mkdir(REPLACED_DIR, { recursive: true })
+  for (const dir of SWAPPED_DIRS) {
+    const live = path.join(DATA_DIR, dir), staged = path.join(STAGING_DIR, dir), replaced = path.join(REPLACED_DIR, dir)
+    if (!await exists(staged)) continue // already in place
+    if (await exists(live)) {
+      if (await exists(replaced)) throw new Error(`Unexpected folder: ${replaced}`)
+      await files.rename(live, replaced)
+    }
+    await files.rename(staged, live)
+  }
+  // books missing from the backup that this computer still has (see stageRestore)
+  for (const name of keep) {
+    const from = path.join(REPLACED_DIR, 'books', name), to = path.join(BOOKS_DIR, name)
+    if (await exists(from) && !await exists(to)) await files.rename(from, to)
+  }
+}
+// undo a swapInStaged that failed half-way
+async function swapBack(keep) {
+  for (const name of keep) {
+    const from = path.join(BOOKS_DIR, name), to = path.join(REPLACED_DIR, 'books', name)
+    if (await exists(from) && !await exists(to)) await files.rename(from, to)
+  }
+  for (const dir of SWAPPED_DIRS) {
+    const live = path.join(DATA_DIR, dir), staged = path.join(STAGING_DIR, dir), replaced = path.join(REPLACED_DIR, dir)
+    if (await exists(replaced)) { // the library's folder was moved away
+      if (await exists(live)) await files.rename(live, staged)
+      await files.rename(replaced, live)
+    } else if (!await exists(staged) && await exists(live)) await files.rename(live, staged) // there was none: take the staged one back out
+  }
+}
+
+// Runs before anything reads the data folder: completes a restore that was interrupted
+// while it replaced the library, and removes what's left of one that never got that far.
+async function finishInterruptedRestore() {
+  const job = await readJSON(RESTORE_JOURNAL, null)
+  if (job) {
+    const keep = (Array.isArray(job.keep) ? job.keep : []).filter(n => typeof n === 'string' && n && n === path.basename(n))
+    await swapInStaged(keep)
+    for (const name of STAGED_JSON) {
+      const staged = path.join(STAGING_DIR, name)
+      if (await exists(staged)) await files.rename(staged, path.join(DATA_DIR, name))
+    }
+    await fs.rm(RESTORE_JOURNAL, { force: true })
+    console.log('completed an interrupted restore')
+  }
+  await Promise.all([rmDir(STAGING_DIR), rmDir(REPLACED_DIR)])
+}
+
+// replace the library with a backup; what was there is saved to BACKUPS_DIR first
+async function restoreBackup(file) {
+  const bk = await openBackup(file)
+  await Promise.all([loadLibrary(), loadStats(), loadSettings()])
+  let safety = null, next
+  try {
+    // keep what's being replaced (an empty library has nothing worth keeping)
+    if (Object.keys(library.books ?? {}).length)
+      safety = await createBackup(path.join(BACKUPS_DIR, `Before restore ${ymdhm()}.zip`))
+    next = await stageRestore(bk)
+  } catch (e) {
+    await rmDir(STAGING_DIR).catch(() => {})
+    throw unchanged(e)
+  }
+  // from here on, a restore that's interrupted is completed on the next start
+  await writeFileAtomic(RESTORE_JOURNAL, JSON.stringify({ started: Date.now(), keep: next.keep }))
+  try {
+    await swapInStaged(next.keep)
+  } catch (e) {
+    console.error('restore: could not put the backup in place', e)
+    try {
+      await swapBack(next.keep)
+      await fs.rm(RESTORE_JOURNAL, { force: true })
+    } catch (e2) {
+      console.error('restore: could not undo', e2)
+      throw new Error(`The restore couldn’t finish (${e.message}). Restart Simply Reader to complete it.`, { cause: e })
+    }
+    await rmDir(STAGING_DIR).catch(() => {})
+    throw unchanged(e)
+  }
+  library = next.library
+  stats = next.stats
+  settings.reader = next.reader
+  settings.goals = next.goals
+  try {
+    await Promise.all([saveLibrary(), writeJSON(STATS_FILE, stats), writeJSON(SETTINGS_FILE, settings)])
+  } catch (e) {
+    throw new Error(`The restore couldn’t finish (${e.message}). Restart Simply Reader to complete it.`, { cause: e })
+  }
+  await fs.rm(RESTORE_JOURNAL, { force: true }).catch(e => console.error('restore: journal', e))
+  // the replaced books and covers are in the safety copy
+  await Promise.all([rmDir(STAGING_DIR), rmDir(REPLACED_DIR)]).catch(e => console.error('restore: cleanup', e))
+  return { books: Object.keys(next.library.books).length, prefs: bk.prefs, safety: safety?.path ?? null }
+}
+
+function autoBackupIfDue(force) { return exclusive(() => autoBackup(force)) }
+async function autoBackup(force) {
   await loadSettings()
   const cfg = backupConfig()
   if (!cfg.auto || !cfg.folder) return
@@ -639,7 +791,7 @@ async function autoBackupIfDue(force) {
     cfg.lastError = String(e?.message ?? e)
     console.error('automatic backup failed', e)
   }
-  await writeJSON(SETTINGS_FILE, settings)
+  await saveJSON(SETTINGS_FILE, settings)
 }
 
 const backupInfo = async () => {
@@ -660,9 +812,9 @@ ipcMain.handle('backup-create', async (_e, prefs) => {
     filters: [{ name: 'Backup', extensions: ['zip'] }],
   })
   if (r.canceled || !r.filePath) return null
-  const res = await createBackup(r.filePath)
+  const res = await exclusive(() => createBackup(r.filePath))
   Object.assign(c, { lastAt: Date.now(), lastPath: res.path })
-  await writeJSON(SETTINGS_FILE, settings)
+  await saveJSON(SETTINGS_FILE, settings)
   return res
 })
 ipcMain.handle('backup-pick', async () => {
@@ -676,7 +828,7 @@ ipcMain.handle('backup-pick', async () => {
   const bk = await openBackup(r.filePaths[0])
   return { path: r.filePaths[0], created: bk.manifest.created ?? null, books: Object.keys(bk.lib.books).length }
 })
-ipcMain.handle('backup-restore', (_e, file) => restoreBackup(file))
+ipcMain.handle('backup-restore', (_e, file) => exclusive(() => restoreBackup(file)))
 ipcMain.handle('backup-auto', async (_e, opts = {}) => {
   await loadSettings()
   const c = backupConfig()
@@ -689,7 +841,7 @@ ipcMain.handle('backup-auto', async (_e, opts = {}) => {
     c.folder = r.filePaths[0]
     if (opts.enable !== false) c.auto = true
   } else if (typeof opts.enable === 'boolean') c.auto = opts.enable
-  await writeJSON(SETTINGS_FILE, settings)
+  await saveJSON(SETTINGS_FILE, settings)
   if (c.auto && c.folder) await autoBackupIfDue(!c.lastAutoAt || opts.chooseFolder) // first backup right away
   return backupInfo()
 })
@@ -714,7 +866,7 @@ ipcMain.handle('settings-get', async () => (await loadSettings()).reader ?? {})
 ipcMain.handle('settings-set', async (_e, reader) => {
   await loadSettings()
   settings.reader = reader
-  await writeJSON(SETTINGS_FILE, settings)
+  await saveJSON(SETTINGS_FILE, settings)
 })
 
 // reading goals: minutes a day and books a year (null = no goal)
@@ -724,7 +876,7 @@ ipcMain.handle('goals-get', async () => cleanGoals((await loadSettings()).goals)
 ipcMain.handle('goals-set', async (_e, goals) => {
   await loadSettings()
   settings.goals = cleanGoals(goals)
-  await writeJSON(SETTINGS_FILE, settings)
+  await saveJSON(SETTINGS_FILE, settings)
   return settings.goals
 })
 

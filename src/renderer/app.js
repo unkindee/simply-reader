@@ -357,12 +357,14 @@ async function coverFields(book, prev) {
 
 // re-create low-resolution covers saved by older versions, one book at a time while idle
 let coverUpgradeRunning = false
+let restoring = false // a backup is replacing the library: background saves stop
 async function upgradeCovers() {
   if (coverUpgradeRunning) return
   coverUpgradeRunning = true
   let changed = false
   try {
     for (const b of Object.values(libCache)) {
+      if (restoring) break
       if (b.missing || b.customCover || b.coverRes === COVER_RES) continue
       while (current) await wait(2000) // never compete with the open book
       await new Promise(r => (window.requestIdleCallback ?? setTimeout)(r))
@@ -371,6 +373,7 @@ async function upgradeCovers() {
         const { name, data } = await api.readBook(b.path)
         book = await makeBook(new File([data], name))
         const cover = await makeThumb(book)
+        if (restoring) break
         const entry = await api.library.upsert(b.path, cover ? { cover, coverRes: COVER_RES } : { coverRes: COVER_RES })
         libCache[entry.id] = { ...libCache[entry.id], ...entry }
         changed ||= !!cover
@@ -647,6 +650,7 @@ try { libMode = ['shelf', 'list'].includes(localStorage.getItem('libMode')) ? lo
 $$('#lib-mode button').forEach(b => b.onclick = () => {
   libMode = b.dataset.mode
   try { localStorage.setItem('libMode', libMode) } catch {}
+  shareViewPrefs()
   renderLibrary()
 })
 
@@ -928,7 +932,9 @@ $('#card-menu').addEventListener('click', async e => {
     if (!confirm(`Remove “${b.title}” from the library?
 
 Its saved copy, reading position, bookmarks and highlights will be deleted.`)) return
-    await api.library.remove(b.id); refreshLibrary(); toast(`Removed “${b.title}”`)
+    try { await api.library.remove(b.id) }
+    catch (e) { console.error(e); return toast(`Couldn’t remove “${b.title}”`, 'error') }
+    refreshLibrary(); toast(`Removed “${b.title}”`)
   }
 })
 
@@ -1347,6 +1353,7 @@ function activeFilter() {
 function setLibFilter(f) {
   libFilter = f
   try { localStorage.setItem('libFilter', f) } catch {}
+  shareViewPrefs()
   renderLibrary()
 }
 
@@ -1495,17 +1502,21 @@ function noteReading(fraction) {
   // pages read: from the page numbers when they're known (a two-page spread is two pages),
   // otherwise one per forward page turn; jumps and going back don't count
   const page = currentPageNumber()
+  let turnedForward = false
   if (page != null && readPage != null) {
     const diff = page - readPage
-    if (diff > 0 && diff <= 4) addReading(0, diff)
+    turnedForward = diff > 0 && diff <= 4
+    if (turnedForward) addReading(0, diff)
   } else if (page == null && readFraction != null) {
     const step = (fraction - readFraction) * (current.length || 0)
-    if (step > 0 && step < 15000) addReading(0, 1)
+    turnedForward = step > 0 && step < 15000
+    if (turnedForward) addReading(0, 1)
   }
   if (page !== readPage || fraction !== readFraction) { readPage = page; readFraction = fraction }
-  // remember when a book was finished, once
+  // remember when a book was finished, once: only when the end is reached by turning pages,
+  // not by jumping there (End, the progress slider, the contents, a search result)
   const entry = libCache[current.id]
-  if (fraction >= FINISHED && entry && !entry.finishedAt) {
+  if (fraction >= FINISHED && turnedForward && entry && !entry.finishedAt) {
     entry.finishedAt = Date.now()
     api.library.upsert(current.path, { finishedAt: entry.finishedAt })
   }
@@ -1791,6 +1802,8 @@ function uiPrefs() {
   try { for (const k of PREF_KEYS) { const v = localStorage.getItem(k); if (v != null) out[k] = v } } catch {}
   return out
 }
+// keep main's copy current, so automatic backups carry today's view choices
+const shareViewPrefs = debounce(() => api.backup.setPrefs(uiPrefs()).catch(console.error), 1000)
 const fmtWhen = t => new Date(t).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 const fmtSize = n => n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`
 
@@ -1868,9 +1881,12 @@ $('#bk-restore').onclick = () => backupBusy('Reading the backup…', async () =>
     return
   }
   $('#bk-status').textContent = 'Restoring…'
+  restoring = true
   await closeBook()
   flushReading()
-  const r = await api.backup.restore(pick.path)
+  let r
+  try { r = await api.backup.restore(pick.path) }
+  finally { if (!r) restoring = false } // failed: the library is still the one shown
   try {
     for (const k of PREF_KEYS) localStorage.removeItem(k)
     for (const [k, v] of Object.entries(r.prefs ?? {})) if (PREF_KEYS.includes(k) && typeof v === 'string') localStorage.setItem(k, v)
@@ -3450,7 +3466,7 @@ function hideLookup() {
 const ENGINE_SPEED = 1600 // size units per minute assumed by the engine's estimates
 let speedStats = { size: 0, ms: 0 }
 try { speedStats = { ...speedStats, ...JSON.parse(localStorage.getItem('readingSpeed') ?? '{}') } } catch {}
-const saveSpeed = debounce(() => { try { localStorage.setItem('readingSpeed', JSON.stringify(speedStats)) } catch {} }, 2000)
+const saveSpeed = debounce(() => { try { localStorage.setItem('readingSpeed', JSON.stringify(speedStats)) } catch {} shareViewPrefs() }, 2000)
 const speedLearned = () => speedStats.ms >= 3 * 60000
 const readingSpeed = () => speedLearned() ? speedStats.size / (speedStats.ms / 60000) : ENGINE_SPEED
 let speedMark = null // where and when the current page was reached
@@ -3622,7 +3638,7 @@ $('#lib-import').onclick = importFolder
 $('[data-action="open"]').onclick = openDialog
 $('[data-action="import"]').onclick = importFolder
 $('#lib-filter').oninput = debounce(renderLibrary, 150) // don't rebuild every card on each keystroke
-$('#lib-sort').onchange = () => { renderLibrary(); localStorage.setItem('sort', $('#lib-sort').value) }
+$('#lib-sort').onchange = () => { renderLibrary(); try { localStorage.setItem('sort', $('#lib-sort').value) } catch {} shareViewPrefs() }
 
 let dragDepth = 0
 document.addEventListener('dragenter', e => { if (e.dataTransfer?.types.includes('Files')) { dragDepth++; document.body.classList.add('dragging') } })
