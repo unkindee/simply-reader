@@ -1,0 +1,64 @@
+# Builds the Linux packages (AppImage, .deb, .rpm) on GitHub's Ubuntu runners and attaches
+# them to a release, adding their checksums to SHA256SUMS.txt. Runs when a release is
+# published, or by hand for an existing release (Actions → Linux packages → Run workflow).
+name: Linux packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and attach to (for example v1.0.2)
+        required: true
+
+permissions:
+  contents: write # upload release assets
+
+concurrency:
+  group: linux-packages-${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install rpmbuild
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run dist:linux -- --x64 --publish never
+
+      - name: Check the packages
+        run: |
+          ls -l dist/*.AppImage dist/*.deb dist/*.rpm
+          dpkg-deb --info dist/*.deb | grep -E 'Package|Version|Depends'
+          rpm -qip dist/*.rpm | grep -E '^(Name|Version|Architecture)'
+          # the app must not ship books or library data
+          if dpkg-deb -c dist/*.deb | grep -Ei '\.(epub|mobi|azw3?|fb2|cbz)$|library\.json'; then exit 1; fi
+
+      - name: Attach to the release
+        run: |
+          cd dist
+          files=$(ls *.AppImage *.deb *.rpm)
+          mkdir -p sums
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS.txt --dir sums || true
+          touch sums/SHA256SUMS.txt
+          # keep the Windows lines, replace any earlier Linux ones (a re-run)
+          for f in $files; do awk -v f="$f" '$2 != f && $2 != "*" f' sums/SHA256SUMS.txt > sums/tmp; mv sums/tmp sums/SHA256SUMS.txt; done
+          sha256sum --binary $files >> sums/SHA256SUMS.txt
+          cat sums/SHA256SUMS.txt
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber $files sums/SHA256SUMS.txt
