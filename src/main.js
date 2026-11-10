@@ -3,7 +3,7 @@ const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, Menu, session
 const path = require('node:path')
 const fs = require('node:fs/promises')
 const crypto = require('node:crypto')
-const { pathToFileURL } = require('node:url')
+const { pathToFileURL, fileURLToPath } = require('node:url')
 const files = require('./files')
 
 const SUPPORTED = ['.epub', '.mobi', '.azw3', '.azw', '.kf8', '.prc', '.fb2', '.fbz', '.cbz', '.pdf']
@@ -103,11 +103,27 @@ const saveLibrary = () => writeJSON(LIBRARY_FILE, library)
 let settings = null // kept in memory; settings.json is only written, never re-read
 let settingsLoad = null
 const loadSettings = () => (settingsLoad ??= ready().then(() => readJSON(SETTINGS_FILE, {})).then(s => (settings = s)))
-const bookId = p => crypto.createHash('sha1').update(path.resolve(p).toLowerCase()).digest('hex').slice(0, 16)
+// Windows paths are case-insensitive (one file can be written several ways); Linux paths
+// aren't. Ids and path comparisons follow the platform; on Windows this is the same
+// lower-casing 1.0.0 used, so existing ids don't change.
+const ON_WINDOWS = process.platform === 'win32'
+const pathKey = p => ON_WINDOWS ? path.resolve(p).toLowerCase() : path.resolve(p)
+const bookId = p => crypto.createHash('sha1').update(pathKey(p)).digest('hex').slice(0, 16)
 
 // ---------- stored book copies ----------
-const isStored = p => path.dirname(path.resolve(p)).toLowerCase() === BOOKS_DIR.toLowerCase()
+const isStored = p => pathKey(path.dirname(path.resolve(p))) === pathKey(BOOKS_DIR)
 const exists = p => fs.access(p).then(() => true, () => false)
+// The stored copy with this file name, whatever its case. Stored names stay unique ignoring
+// case, so two books never share an id where paths are case-insensitive, and a library
+// restored on Windows never has two clashing files.
+async function findStored(name) {
+  const exact = path.join(BOOKS_DIR, name)
+  if (await exists(exact)) return exact // on Windows this matches any case
+  if (ON_WINDOWS) return null
+  const lower = name.toLowerCase()
+  const hit = (await fs.readdir(BOOKS_DIR).catch(() => [])).find(f => f.toLowerCase() === lower)
+  return hit ? path.join(BOOKS_DIR, hit) : null
+}
 const fileHash = async p => crypto.createHash('sha1').update(await fs.readFile(p)).digest('hex')
 const sameFile = async (a, b) => {
   const [sa, sb] = await Promise.all([fs.stat(a), fs.stat(b)])
@@ -123,13 +139,15 @@ async function storeBook(src) {
   await fs.mkdir(BOOKS_DIR, { recursive: true })
   const ext = path.extname(src), stem = path.basename(src, ext)
   for (let n = 1; ; n++) {
-    const dest = path.join(BOOKS_DIR, n === 1 ? stem + ext : `${stem} (${n})${ext}`)
+    const name = n === 1 ? stem + ext : `${stem} (${n})${ext}`
+    const dest = path.join(BOOKS_DIR, name)
     const key = dest.toLowerCase()
     while (claimedNames.has(key)) await claimedNames.get(key)
     let release
     claimedNames.set(key, new Promise(r => (release = r))) // no await between the check and the claim
     try {
-      if (!await exists(dest)) {
+      const existing = await findStored(name)
+      if (!existing) {
         const tmp = dest + '.part'
         try {
           await fs.copyFile(src, tmp)
@@ -137,7 +155,7 @@ async function storeBook(src) {
         } catch (e) { await fs.rm(tmp, { force: true }); throw e }
         return dest
       }
-      if (await sameFile(src, dest)) return dest // already stored
+      if (await sameFile(src, existing)) return existing // already stored
     } finally {
       claimedNames.delete(key)
       release()
@@ -208,9 +226,17 @@ async function migrateToStoredBooks() {
 let win = null
 let pendingOpen = [] // files passed on the command line before the window is ready
 
+// files given on the command line. Linux file managers pass file:// URIs (the .desktop
+// entry's %U); Windows passes plain paths.
+const argPath = a => {
+  if (/^file:\/\//i.test(a)) { try { return fileURLToPath(a) } catch { return null } }
+  if (/^[a-z][a-z\d+.-]+:\/\//i.test(a)) return null // another kind of URI (https:// …)
+  return path.resolve(a)
+}
 const filesFromArgv = argv => argv.slice(1)
-  .filter(a => !a.startsWith('-') && isSupported(a))
-  .map(a => path.resolve(a))
+  .filter(a => !a.startsWith('-'))
+  .map(argPath)
+  .filter(p => p && isSupported(p))
 
 const openExternalIfWeb = url => { if (/^https?:|^mailto:/i.test(url)) shell.openExternal(url) }
 
@@ -259,8 +285,13 @@ const createWindow = async () => {
     }
   })
   win.webContents.on('before-input-event', (e, input) => {
-    if (input.type === 'keyDown' && input.key === 'F12' && !app.isPackaged)
-      win.webContents.toggleDevTools()
+    if (input.type !== 'keyDown') return
+    if (input.key === 'F12' && !app.isPackaged) win.webContents.toggleDevTools()
+    // Ctrl+Q quits, as in other Linux apps
+    if (process.platform === 'linux' && input.control && !input.alt && !input.shift && input.key.toLowerCase() === 'q') {
+      e.preventDefault()
+      win.close()
+    }
   })
 
   win.loadURL('app://reader/src/renderer/index.html')
@@ -557,6 +588,18 @@ const pad2 = n => String(n).padStart(2, '0')
 const ymd = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 const ymdhm = (d = new Date()) => `${ymd(d)} ${pad2(d.getHours())}.${pad2(d.getMinutes())}`
 const backupConfig = () => (settings.backup ??= {})
+// A book's file name inside a backup, chosen so the backup restores on any system: Windows
+// forbids <>:"/\|?* and control characters, and device names such as CON or NUL, which
+// Linux allows. Names that come from Windows never contain these, so they don't change.
+const portableName = name => {
+  const ext = path.extname(name)
+  let stem = name.slice(0, name.length - ext.length).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+  if (!stem || /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\.|$)/i.test(stem)) stem = '_' + stem
+  return stem + ext
+}
+const numbered = (name, n) => { const ext = path.extname(name); return `${name.slice(0, name.length - ext.length)} (${n})${ext}` }
+// a backup's book entry is one plain file name, never a path
+const isPlainName = n => typeof n === 'string' && n !== '' && n !== '.' && n !== '..' && !/[/\\\x00]/.test(n)
 
 // one backup or restore at a time: the weekly timer, "Back up now" and "Restore" never read
 // files that another job is writing or deleting (or write the same .part file)
@@ -576,9 +619,9 @@ async function createBackup(dest) {
   for (const b of Object.values(lib.books ?? {})) {
     delete b.missing
     if (!b?.id || !b.path || !await exists(b.path)) continue // a missing file: keep the entry only
-    const ext = path.extname(b.path), stem = path.basename(b.path, ext)
-    let name = stem + ext
-    for (let n = 2; used.has(name.toLowerCase()); n++) name = `${stem} (${n})${ext}`
+    const safe = portableName(path.basename(b.path))
+    let name = safe
+    for (let n = 2; used.has(name.toLowerCase()); n++) name = numbered(safe, n)
     used.add(name.toLowerCase())
     manifest.books[b.id] = name
     entries.push({ name: 'books/' + name, file: b.path })
@@ -597,9 +640,6 @@ async function createBackup(dest) {
   return { path: dest, size, books: Object.keys(lib.books ?? {}).length }
 }
 
-const backupFileOk = n => /^(manifest|library|stats|settings|prefs)\.json$/.test(n)
-  || /^covers\/[0-9a-f]{16}\.jpg$/.test(n)
-  || (/^books\/[^/\\:*?"<>|]+$/.test(n) && !n.includes('..') && isSupported(n))
 async function openBackup(file) {
   if (typeof file !== 'string' || !/\.zip$/i.test(file)) throw new Error('Choose a .zip backup file')
   const zip = await openZip(file) // reads only the archive's index; books are extracted one by one
@@ -641,10 +681,15 @@ async function stageRestore(bk) {
     if (!entry || typeof entry !== 'object') continue
     const zipName = bk.manifest.books?.[oldId]
     let p = entry.path
-    if (typeof zipName === 'string' && backupFileOk('books/' + zipName) && bk.zip.has('books/' + zipName)) {
-      p = path.join(BOOKS_DIR, zipName) // books live in this computer's library folder
-      await bk.zip.extract('books/' + zipName, path.join(stagedBooks, zipName))
-      staged.add(zipName.toLowerCase())
+    if (isPlainName(zipName) && isSupported(zipName) && bk.zip.has('books/' + zipName)) {
+      // books live in this computer's library folder, under a name every system accepts
+      // (a backup made elsewhere, or by hand, may use names this system doesn't)
+      const safe = portableName(zipName)
+      let fileName = safe
+      for (let n = 2; staged.has(fileName.toLowerCase()); n++) fileName = numbered(safe, n)
+      p = path.join(BOOKS_DIR, fileName)
+      await bk.zip.extract('books/' + zipName, path.join(stagedBooks, fileName))
+      staged.add(fileName.toLowerCase())
     } else if (typeof p === 'string' && p && isStored(p)) keep.add(path.basename(p)) // not in the backup: keep this computer's copy, if any
     if (typeof p !== 'string' || !p) continue
     const id = bookId(p)

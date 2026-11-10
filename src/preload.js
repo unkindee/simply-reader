@@ -2,6 +2,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 contextBridge.exposeInMainWorld('api', {
+  platform: process.platform, // 'win32', 'linux'…: for platform-specific fonts and wording
   chooseFiles: () => ipcRenderer.invoke('choose-files'),
   chooseFolder: () => ipcRenderer.invoke('choose-folder'),
   readBook: p => ipcRenderer.invoke('read-book', p),

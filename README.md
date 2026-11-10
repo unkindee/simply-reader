@@ -1,8 +1,8 @@
 # Simply Reader
 
-A calm, fast desktop e-book reader for Windows. It opens **EPUB, MOBI, AZW3/AZW, KF8/PRC, FB2/FBZ, CBZ and PDF** files, keeps your library in one place, and remembers where you stopped in every book.
+A calm, fast desktop e-book reader for Windows and Linux (Fedora, Linux Mint and other distributions). It opens **EPUB, MOBI, AZW3/AZW, KF8/PRC, FB2/FBZ, CBZ and PDF** files, keeps your library in one place, and remembers where you stopped in every book.
 
-**[Download the latest version](https://github.com/unkindee/simply-reader/releases/latest)**: an installer, or a portable `.exe` that runs without installing.
+**[Download the latest version](https://github.com/unkindee/simply-reader/releases/latest)**: for Windows, an installer or a portable `.exe` that runs without installing; for Linux, a `.rpm` (Fedora), a `.deb` (Linux Mint, Ubuntu, Debian) or an AppImage.
 
 ![The Simply Reader library: covers, Continue reading and reading goals](docs/screenshots/library.png)
 
@@ -41,7 +41,9 @@ A calm, fast desktop e-book reader for Windows. It opens **EPUB, MOBI, AZW3/AZW,
 
 ## Install
 
-Download from the **[Releases page](https://github.com/unkindee/simply-reader/releases/latest)**:
+Download from the **[Releases page](https://github.com/unkindee/simply-reader/releases/latest)**.
+
+### Windows
 
 | File | What it does |
 |---|---|
@@ -49,6 +51,18 @@ Download from the **[Releases page](https://github.com/unkindee/simply-reader/re
 | `SimplyReader-Portable-<version>.exe` | Runs without installing. Your library is still kept in `%APPDATA%\Simply Reader`. |
 
 The app isn't code-signed yet, so Windows SmartScreen may warn the first time you run it: click **More info → Run anyway**. When you build from source, the same files appear in `dist/` (the installer is named `Simply Reader Setup <version>.exe` there).
+
+### Linux
+
+| File | For | How |
+|---|---|---|
+| `simply-reader-<version>.x86_64.rpm` | Fedora and other RPM-based distributions | `sudo dnf install ./simply-reader-<version>.x86_64.rpm` |
+| `simply-reader_<version>_amd64.deb` | Linux Mint, Ubuntu, Debian | Double-click it, or `sudo apt install ./simply-reader_<version>_amd64.deb` |
+| `SimplyReader-<version>-x86_64.AppImage` | Any distribution, without installing | Make it executable (`chmod +x`) and run it |
+
+The `.rpm` and `.deb` add Simply Reader to the app menu and to **Open with** for e-book files, and they're removed like any other package (`sudo dnf remove simply-reader`, `sudo apt remove simply-reader`). The AppImage doesn't register **Open with**. If it doesn't start, install FUSE 2 support (`sudo apt install libfuse2t64` on Mint 22 and Ubuntu 24.04, `sudo dnf install fuse-libs` on Fedora). On Mint and Ubuntu, prefer the `.deb`, which also sets up the security sandbox the app runs in.
+
+The Linux packages aren't signed yet either.
 
 Double-clicking a book while Simply Reader is already open opens it in the same window.
 
@@ -83,7 +97,7 @@ Double-clicking a book while Simply Reader is already open opens it in the same 
 ### Reading
 
 - **Layout**: one or two pages side by side, or one continuous scroll. In two-page mode you read the left page, then the right.
-- **Text**: font (including the bundled, very legible *Atkinson Hyperlegible*), size, line spacing, margins, line width, justification, hyphenation, and an option to override the book's own colours.
+- **Text**: font (including the bundled, very legible *Atkinson Hyperlegible*), size, line spacing, margins, line width, justification, hyphenation, and an option to override the book's own colours. On Linux, the font list shows the fonts installed on your system.
 - **Per-book settings**:
   - Each book remembers its own font, size, spacing, margins, layout and PDF zoom, so a PDF and a novel never fight over one setting.
   - The settings panel says whether the book uses your defaults or its own settings. **Use for all books** makes a book's settings your new defaults; **Reset this book** returns it to them.
@@ -141,7 +155,7 @@ Reading time counts only while a book is open, the window is visible, and you're
 The box button in the header opens **Backup & restore**:
 
 - **Back up now** saves everything in one `.zip` file: your books, reading positions, highlights, notes, bookmarks, collections, covers, edited details, per-book settings, book info, reading stats, goals and settings.
-- **Automatic backup**: once a week, to a folder you choose. A OneDrive or Dropbox folder keeps a copy off your computer. The 5 newest are kept.
+- **Automatic backup**: once a week, to a folder you choose. A OneDrive or Dropbox folder (on Linux, Dropbox or Nextcloud) keeps a copy off your computer. The 5 newest are kept.
 - **Restore** replaces your library with a backup. Your current library is saved first, so a restore can always be undone.
 - **New computer or empty library?** Click **Restore a backup** on the empty-library screen (or the backup button in the header) to bring everything back in one step.
 
@@ -185,6 +199,8 @@ The box button in the header opens **Backup & restore**:
 | Delete | Remove the selected books (list view) |
 | Esc | Clear the selection, or close a menu |
 
+On Linux, Ctrl+Q quits Simply Reader.
+
 **In the picture viewer**
 
 | Key | Action |
@@ -195,7 +211,7 @@ The box button in the header opens **Backup & restore**:
 
 ## Where your data lives
 
-Everything is in `%APPDATA%\Simply Reader\`:
+Everything is in one folder: `%APPDATA%\Simply Reader\` on Windows, `~/.config/Simply Reader/` on Linux.
 
 | Item | Contents |
 |---|---|
@@ -205,6 +221,8 @@ Everything is in `%APPDATA%\Simply Reader\`:
 | `books\` | The copies of your books |
 | `covers\` | Cover images |
 | `backups\` | Copies saved automatically before each restore |
+
+A backup made on Windows restores on Linux, and the other way round.
 
 The app used to be called *Inkleaf Reader*. On its first start, Simply Reader moves the old `%APPDATA%\Inkleaf Reader\` folder to its new place, so nothing is lost.
 
@@ -223,9 +241,10 @@ Simply Reader works offline. The window that shows your books has no network acc
 npm install
 npm start          # run the app
 npm run dist       # build the installer and portable exe into dist/
+npm run dist:linux # on Linux: build the AppImage, .deb and .rpm into dist/
 ```
 
-Close any running copy of Simply Reader before `npm run dist`, otherwise the build can't replace the files. Developer notes on how the app works inside are in [`CLAUDE.md`](CLAUDE.md).
+Close any running copy of Simply Reader before `npm run dist`, otherwise the build can't replace the files. The Linux packages are built on Linux (the `.rpm` needs `rpmbuild`, from the `rpm` package). Developer notes on how the app works inside are in [`CLAUDE.md`](CLAUDE.md).
 
 ## Credits
 

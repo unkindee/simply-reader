@@ -194,9 +194,58 @@ const SEGMENTS = {
 }
 const CHECKBOXES = ['justify', 'hyphenate', 'override', 'pageNumbers', 'pdfDark']
 
+// Font menu. Windows has the fonts listed in index.html. Elsewhere (Linux) installed fonts
+// vary by distribution, so the menu lists the candidates below that are actually there. The
+// Windows fonts keep their Windows values, so a font chosen on one system still matches on
+// another that has it.
+const FONT_CANDIDATES = {
+  serif: ['Georgia, serif', "'Palatino Linotype', 'Book Antiqua', Palatino, serif", 'Cambria, serif', "'Times New Roman', serif",
+    "'Noto Serif', serif", "'DejaVu Serif', serif", "'Liberation Serif', serif", "'Source Serif 4', serif", 'Gelasio, serif'],
+  sans: ["'Segoe UI', system-ui, sans-serif", 'Calibri, sans-serif', 'Verdana, sans-serif',
+    "'Noto Sans', sans-serif", "'DejaVu Sans', sans-serif", "'Liberation Sans', sans-serif", 'Ubuntu, sans-serif',
+    "'Adwaita Sans', sans-serif", 'Cantarell, sans-serif', 'Carlito, sans-serif'],
+  mono: ['Consolas, monospace', "'Noto Sans Mono', monospace", "'DejaVu Sans Mono', monospace", "'Liberation Mono', monospace",
+    "'Ubuntu Mono', monospace", "'Adwaita Mono', monospace"],
+}
+const firstFamily = value => value.split(',')[0].replace(/['"]/g, '').trim()
+const FONT_LABELS = { 'Palatino Linotype': 'Palatino', 'Times New Roman': 'Times' }
+function listInstalledFonts() {
+  if (api.platform === 'win32') return
+  // A font is installed when sample text set in it measures differently from the generic
+  // families. Linux can also stand in a look-alike for a missing font (Liberation Serif for
+  // Times New Roman): fonts that measure exactly like one already listed are left out.
+  const ctx = document.createElement('canvas').getContext('2d')
+  const sample = 'mmmmmmmmmmlli1|WQ@#Ægå—'
+  const widths = family => ['monospace', 'serif', 'sans-serif'].map(base => {
+    ctx.font = `40px ${family ? `"${family}", ` : ''}${base}`
+    return ctx.measureText(sample).width
+  }).join()
+  const generic = widths(null), seen = new Set([generic])
+  const pick = value => {
+    const w = widths(firstFamily(value))
+    if (seen.has(w)) return null
+    seen.add(w)
+    return el('option', { value, text: FONT_LABELS[firstFamily(value)] ?? firstFamily(value) })
+  }
+  const sel = $('#set-font')
+  const keep = value => [...sel.options].find(o => o.value === value || (value === 'atkinson' && o.value.includes('Atkinson')))
+  sel.replaceChildren(keep('publisher'), ...FONT_CANDIDATES.serif.map(pick).filter(Boolean), keep('atkinson'),
+    ...[...FONT_CANDIDATES.sans, ...FONT_CANDIDATES.mono].map(pick).filter(Boolean))
+}
+// a font chosen on another computer (in a restored backup) that this one doesn't list
+function showFontChoice(value) {
+  const sel = $('#set-font')
+  if (![...sel.options].some(o => o.value === value)) {
+    const name = FONT_LABELS[firstFamily(value)] ?? firstFamily(value)
+    // outside Windows the list holds every installed candidate, so this one isn't installed
+    sel.append(el('option', { value, text: api.platform === 'win32' ? name : `${name} (not installed)` }))
+  }
+  sel.value = value
+}
+
 function syncSettingsUI() {
   $$('[data-theme-btn]').forEach(b => b.classList.toggle('active', b.dataset.themeBtn === S.theme))
-  $('#set-font').value = S.fontFamily
+  showFontChoice(S.fontFamily)
   $('#out-fontSize').value = S.fontSize + 'px'
   $('#set-lineHeight').value = S.lineHeight; $('#out-lineHeight').value = (+S.lineHeight).toFixed(2)
   $('#set-gap').value = S.gap; $('#out-gap').value = S.gap + '%'
@@ -225,6 +274,7 @@ function zoomStep(dir) {
 
 function initSettingsUI() {
   $$('[data-theme-btn]').forEach(b => b.onclick = () => setSetting('theme', b.dataset.themeBtn))
+  listInstalledFonts()
   $('#set-font').onchange = e => setSetting('fontFamily', e.target.value)
   $$('[data-step]').forEach(b => b.onclick = () => changeFontSize(+b.dataset.dir))
   // sliders fire many input events per second while dragging: restyle the book once per frame
@@ -1826,7 +1876,7 @@ async function renderBackupInfo(info) {
   note.classList.toggle('error', !!(info.auto && info.error))
   note.textContent = info.auto && info.error ? `The last automatic backup failed: ${info.error}`
     : info.auto && info.lastAutoAt ? `Last automatic backup: ${fmtWhen(info.lastAutoAt)}. The 5 newest are kept.`
-    : 'Choose a OneDrive or Dropbox folder to keep a copy off this computer. The 5 newest automatic backups are kept.'
+    : `Choose ${api.platform === 'win32' ? 'a OneDrive or Dropbox' : 'a Dropbox or Nextcloud'} folder to keep a copy off this computer. The 5 newest automatic backups are kept.`
 }
 async function backupBusy(text, job) {
   const dlg = $('#backup-dialog')

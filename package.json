@@ -1,15 +1,17 @@
 {
   "name": "simply-reader",
   "productName": "Simply Reader",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A desktop e-book reader for EPUB, MOBI, AZW3, FB2 and CBZ",
   "main": "src/main.js",
+  "desktopName": "simply-reader.desktop",
   "author": "drago",
   "license": "MIT",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis portable"
+    "dist": "electron-builder --win nsis portable",
+    "dist:linux": "electron-builder --linux AppImage deb rpm"
   },
   "build": {
     "appId": "com.simplyreader.app",
@@ -37,6 +39,50 @@
     },
     "portable": {
       "artifactName": "SimplyReader-Portable-${version}.exe"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ],
+      "executableName": "simply-reader",
+      "syncDesktopName": true,
+      "icon": "src/renderer/icon.png",
+      "category": "Office",
+      "synopsis": "A calm, fast e-book reader",
+      "description": "Simply Reader opens EPUB, MOBI, AZW3, FB2, CBZ and PDF books, keeps your library in one place and remembers where you stopped in every book.",
+      "maintainer": "Dragos B <20815213+unkindee@users.noreply.github.com>",
+      "mimeTypes": [
+        "application/epub+zip",
+        "application/x-mobipocket-ebook",
+        "application/vnd.amazon.mobi8-ebook",
+        "application/x-fictionbook+xml",
+        "application/vnd.comicbook+zip"
+      ],
+      "desktop": {
+        "entry": {
+          "Keywords": "ebook;e-book;epub;mobi;kindle;reader;books;library;"
+        }
+      }
+    },
+    "appImage": {
+      "artifactName": "SimplyReader-${version}-${arch}.AppImage"
+    },
+    "deb": {
+      "packageCategory": "text",
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "libasound2t64 | libasound2"
+      ]
     },
     "fileAssociations": [
       {

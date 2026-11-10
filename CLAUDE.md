@@ -4,7 +4,7 @@ Notes for an AI (or a developer) working on this codebase. The user-facing featu
 
 ## What it is
 
-Simply Reader is a Windows desktop e-book reader built with **Electron 45**:
+Simply Reader is a desktop e-book reader for Windows and Linux (Fedora, Linux Mint), built with **Electron 45**:
 
 - No framework, no bundler and no build step for the app code. The renderer is a single ES-module script loaded directly by `index.html`.
 - The book engine is **foliate-js**, vendored in `vendor/foliate-js` and imported straight from the renderer. It parses EPUB, MOBI/AZW3/KF8, FB2, CBZ and PDF (PDF through the pdf.js bundled in `vendor/foliate-js/vendor/pdfjs`).
@@ -16,11 +16,13 @@ Simply Reader is a Windows desktop e-book reader built with **Electron 45**:
 npm install
 npm start        # electron .
 npm run dist     # electron-builder --win nsis portable → dist/Simply Reader Setup <version>.exe, dist/SimplyReader-Portable-<version>.exe
+npm run dist:linux # electron-builder --linux AppImage deb rpm → dist/SimplyReader-<version>-x86_64.AppImage, dist/simply-reader_<version>_amd64.deb, dist/simply-reader-<version>.x86_64.rpm
 ```
 
-**Releasing a new version:** `npm version <x.y.z> --no-git-tag-version` (updates package.json and package-lock.json) → close the app → `npm run dist` → commit and push → annotated tag `v<x.y.z>` → `gh release create` with the two exes renamed to `SimplyReader-Setup-<x.y.z>.exe` / `SimplyReader-Portable-<x.y.z>.exe` (GitHub turns spaces into dots) plus a `SHA256SUMS.txt`. Old releases stay as they were. Commits and tags use the GitHub noreply email set in this repo's git config; never the user's personal address.
+**Releasing a new version:** `npm version <x.y.z> --no-git-tag-version` (updates package.json and package-lock.json) → close the app → `npm run dist` (and `npm run dist:linux` on Linux for the Linux packages) → commit and push → annotated tag `v<x.y.z>` → `gh release create` with the two exes renamed to `SimplyReader-Setup-<x.y.z>.exe` / `SimplyReader-Portable-<x.y.z>.exe` (GitHub turns spaces into dots), the Linux packages under their built names, plus a `SHA256SUMS.txt`. Old releases stay as they were. Commits and tags use the GitHub noreply email set in this repo's git config; never the user's personal address.
 
 - `npm run dist` fails or hangs if Simply Reader (installed or portable) is running, because it locks files. Ask the user to close it first. If electron-builder is left hanging, kill its processes.
+- `npm run dist:linux` runs on Linux (or in a Linux container): the `.rpm` needs `rpmbuild` (the `rpm` package). It builds for the machine's architecture; add `--x64` / `--arm64` for others. On an ARM machine electron-builder's bundled `fpm` doesn't run: install it (`gem install fpm`) and set `USE_SYSTEM_FPM=true`. Don't publish an ARM64 AppImage: electron-builder's ARM AppImage stub needs `libz.so`, which only development packages provide (the x86_64 one is fine).
 - There's no test suite or linter. Verify changes by driving the real app (see [Testing](#testing)).
 - After a user-visible change the user expects `npm run dist` to be run, so both exes are up to date.
 
@@ -29,7 +31,7 @@ npm run dist     # electron-builder --win nsis portable → dist/Simply Reader S
 | Path | Role |
 |---|---|
 | `src/main.js` (~900 lines) | Main process: window, `app://` protocol, CSP, all disk I/O (library, settings, stats, covers, stored books), backup/restore, network look-ups, IPC handlers |
-| `src/preload.js` | `contextBridge` exposing `window.api` (the only bridge between renderer and main) |
+| `src/preload.js` | `contextBridge` exposing `window.api` (the only bridge between renderer and main), including `api.platform` (`'win32'`, `'linux'`) |
 | `src/zip.js` | Dependency-free zip writer/reader used by backups: `writeZip(dest, entries)` and `openZip(file)` → `{ names, has, read(name), extract(name, destFile) }`. Files are streamed in and out (a backup never has to fit in memory) and ZIP64 records are written past 4 GB or 65,535 files. CRC-checked, UTF-8 names, stores already-compressed files and deflates the rest |
 | `src/files.js` | `rename()` that retries for a few seconds when Windows (antivirus, indexing, OneDrive) briefly locks a file |
 | `src/renderer/index.html` | All markup: library, reader, popovers, `<dialog>`s, and the inline SVG icon sprite (`<symbol id="i-…">`) |
@@ -72,7 +74,7 @@ npm run dist     # electron-builder --win nsis portable → dist/Simply Reader S
 | `showInFolder`, `saveText`, `setFullscreen`, `capture(rect)` | | `capture` snapshots part of the window for the page-turn animation |
 | `onOpenFiles(cb)`, `getPendingFiles`, `pathForFile(file)` | | Drag-and-drop uses `webUtils.getPathForFile` |
 
-## Data on disk (`%APPDATA%\Simply Reader\` = `app.getPath('userData')`)
+## Data on disk (`app.getPath('userData')`: `%APPDATA%\Simply Reader\` on Windows, `~/.config/Simply Reader/` on Linux)
 
 - **`library.json`**: `{ books: { [id]: entry } }`. Rewritten on every position save, so keep big data out of it (covers are files).
 - **`settings.json`**: `{ reader: G, goals, backup: { auto, folder, lastAt, lastPath, lastAutoAt, lastError }, windowBounds, windowMaximized }`.
@@ -102,7 +104,7 @@ Every key the renderer may write must be in main's `allowed` list in `library-up
 
 ### Ids
 
-`bookId = sha1(path.resolve(p).toLowerCase()).slice(0, 16)`, which means **ids are derived from the stored path**. Anything that changes a book's path (legacy migration, restore) must re-key the entry, its `covers/<id>.jpg` and `stats.books[id]`. See `relocateLegacyPaths`, `migrateToStoredBooks` and `restoreBackup`.
+`bookId = sha1(pathKey(p)).slice(0, 16)`, which means **ids are derived from the stored path**. `pathKey` lower-cases the resolved path on Windows (case-insensitive paths, the same formula as 1.0.0) and leaves it as is elsewhere. Anything that changes a book's path (legacy migration, restore) must re-key the entry, its `covers/<id>.jpg` and `stats.books[id]`. See `relocateLegacyPaths`, `migrateToStoredBooks` and `restoreBackup`.
 
 ### Loading the library in main
 
@@ -206,6 +208,22 @@ The current view is captured through `api.capture(rect)`, overlaid as an image, 
 - **Interrupted restore:** `finishInterruptedRestore()` runs before anything reads the data folder (`ready()`). If the journal exists, it finishes the swap and moves the staged JSON files into place; otherwise it deletes leftover `restore-staging/` and `restore-replaced/` folders.
 - **Automatic backup:** `autoBackupIfDue()` runs 60 s after start and every 6 h, at most weekly, into `settings.backup.folder`. It keeps the 5 newest files named `Simply Reader auto-backup YYYY-MM-DD.zip` and never touches other files. The view choices it includes (`prefs.json`) are sent to main by `shareViewPrefs()` whenever one changes.
 - **When you add persistent data**, make sure it travels: library entry fields do automatically. A new `settings.json` key must be added to `createBackup` and `restoreBackup`. New files need zip entries.
+
+## Linux
+
+Windows is the main platform and its behaviour must not change: every Linux difference sits behind `process.platform` (main) or `api.platform` (renderer), and the Windows branch keeps 1.0.0's behaviour.
+
+- **Packaging** (`build.linux` in package.json): AppImage, `.deb` and `.rpm`; executable `simply-reader`, installed to `/opt/Simply Reader/`.
+  - The top-level `desktopName` with `linux.syncDesktopName`: Electron uses `desktopName` as the window's app id / WM_CLASS (`simply-reader`), which must match the menu entry's `StartupWMClass` so docks show the right icon. Only Linux reads it.
+  - File types for **Open with** are in `linux.mimeTypes`, all standard freedesktop types. Don't add `mimeType` to `fileAssociations`: electron-builder 26 then appends the type to `linux.mimeTypes` once per target (duplicates in the menu entry) and installs a MIME definition that can change file icons system-wide. `.azw` needs no entry: Linux recognises it by content as MOBI.
+  - `deb.depends` replaces electron-builder's default list: it's that list plus `libasound2t64 | libasound2`. Electron needs ALSA, and with a plain `libasound2` apt on Ubuntu 24.04 may install the OSS emulation `liboss4-salsa-asound2` instead, which the app can't start with. The `.rpm` defaults are enough.
+  - Never change `appId`, `productName` or the top-level `fileAssociations` for Linux reasons: the Windows installer uses them (upgrade identity, exe name, registered file types). Linux-only settings go under `linux`, `deb`, `rpm` and `appImage`. `homepage` is deliberately unset (NSIS would add it to the uninstall entry); the Linux packages take the URL from the GitHub remote.
+- **Command-line files:** Linux file managers pass `file://` URIs (`Exec=… %U`); `argPath()` converts them and ignores other URIs.
+- **Case-sensitive paths:** ids don't lower-case paths on Linux (see [Ids](#ids)). Stored names stay unique ignoring case (`findStored`), so `Book.epub` and `book.epub` become `Book.epub` and `book (2).epub`.
+- **Backups across systems:** book names in a backup go through `portableName()` (characters Windows forbids become `_`, device names like `CON` get a `_` prefix), and restore applies it again to whatever a backup contains, so Linux backups restore on Windows and the other way round. Names that come from Windows never change.
+- **Fonts:** Windows keeps the list in index.html. On Linux, `listInstalledFonts()` lists the `FONT_CANDIDATES` that are installed (sample text measured against the generic families; look-alikes that measure the same, such as Liberation Serif standing in for Times New Roman, appear once). A saved font that isn't listed is added as "(not installed)" by `showFontChoice()`.
+- **Wording and keys:** the backup hint names Dropbox or Nextcloud instead of OneDrive; Ctrl+Q quits (`before-input-event` in main).
+- **Testing:** install the packages in Fedora and Ubuntu containers (Ubuntu 24.04 stands in for Mint 22, which has no ARM build) and run them under `Xvfb`, with `--no-sandbox` when running as root. Read the window through `--remote-debugging-port`: the packaged app ignores the `SIMPLY_READER_*` test variables.
 
 ## Vendor patches
 
