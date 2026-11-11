@@ -86,3 +86,30 @@ await writeZip(path.join(dir, 'sample.epub'), [
   ...chapters.map(c => ({ name: `OEBPS/${c.file}`, data: Buffer.from(c.html) })),
 ])
 console.log('wrote', path.join(dir, 'sample.epub'))
+
+// sample.cbz: three generated pages
+await writeZip(path.join(dir, 'sample.cbz'), [1, 2, 3].map(n => ({ name: `page-${n}.png`, data: png(600 + n, 900) })))
+console.log('wrote', path.join(dir, 'sample.cbz'))
+
+// sample.pdf: three pages of text, written by hand (offsets in the xref table must be exact)
+{
+  const pages = [1, 2, 3]
+  const objs = []
+  objs[1] = '<< /Type /Catalog /Pages 2 0 R >>'
+  objs[2] = `<< /Type /Pages /Kids [${pages.map((_, i) => `${4 + i * 2} 0 R`).join(' ')}] /Count ${pages.length} >>`
+  objs[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'
+  pages.forEach((p, i) => {
+    const lines = [`Page ${p} of the test PDF`, ...Array.from({ length: 30 }, sentence)].map(t => t.slice(0, 80))
+    const text = `BT /F1 12 Tf 50 780 Td 16 TL ${lines.map(l => `(${l.replace(/[()\\]/g, '')}) '`).join(' ')} ET`
+    objs[4 + i * 2] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + i * 2} 0 R >>`
+    objs[5 + i * 2] = `<< /Length ${Buffer.byteLength(text)} >>\nstream\n${text}\nendstream`
+  })
+  let out = '%PDF-1.4\n'
+  const offsets = []
+  for (let n = 1; n < objs.length; n++) { offsets[n] = Buffer.byteLength(out); out += `${n} 0 obj\n${objs[n]}\nendobj\n` }
+  const xref = Buffer.byteLength(out)
+  out += `xref\n0 ${objs.length}\n0000000000 65535 f \n${offsets.slice(1).map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('')}`
+  out += `trailer\n<< /Size ${objs.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`
+  fs.writeFileSync(path.join(dir, 'sample.pdf'), out)
+  console.log('wrote', path.join(dir, 'sample.pdf'))
+}

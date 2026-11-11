@@ -2,7 +2,7 @@
 # Android SDK. Runs on pushes to the android branch and by hand (Actions → Android APK → Run
 # workflow). The APK is attached to the run as an artifact.
 #
-# The debug build is signed with a debug key kept in the Actions cache, so successive debug
+# The debug build is signed with a debug key kept in the Actions cache (sr-debug-keystore-v1), so successive debug
 # APKs install over each other. A release APK is built too when the repository has these
 # secrets: SR_KEYSTORE_BASE64 (the keystore, base64), SR_KEYSTORE_PASSWORD, SR_KEY_ALIAS,
 # SR_KEY_PASSWORD. The keystore itself never goes into the repository.
@@ -44,8 +44,15 @@ jobs:
       - name: Debug signing key (kept between runs so updates install over each other)
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: android-debug-keystore-v1
+          path: ~/sr-debug.keystore
+          key: sr-debug-keystore-v1
+
+      - name: Create the debug key if there is none yet
+        run: |
+          if [ ! -f ~/sr-debug.keystore ]; then
+            keytool -genkeypair -keystore ~/sr-debug.keystore -storepass android -keypass android               -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
+          fi
+          echo "SR_DEBUG_KEYSTORE=$HOME/sr-debug.keystore" >> "$GITHUB_ENV"
 
       - run: npm ci
 

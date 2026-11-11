@@ -9,6 +9,9 @@ def (vMajor, vMinor, vPatch) = appVersion.tokenize('.').collect { it.replaceAll(
 // Release signing comes from the environment (never from the repository):
 // SR_KEYSTORE (path), SR_KEYSTORE_PASSWORD, SR_KEY_ALIAS, SR_KEY_PASSWORD
 def releaseKeystore = System.getenv('SR_KEYSTORE')
+// Debug builds made on GitHub use one cached debug key (SR_DEBUG_KEYSTORE), so each one installs
+// over the previous one; elsewhere the machine's own debug key is used.
+def debugKeystore = System.getenv('SR_DEBUG_KEYSTORE')
 
 android {
     namespace = "io.github.unkindee.simplyreader"
@@ -27,6 +30,14 @@ android {
         }
     }
     signingConfigs {
+        if (debugKeystore) {
+            debug {
+                storeFile file(debugKeystore)
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
+        }
         if (releaseKeystore) {
             release {
                 storeFile file(releaseKeystore)

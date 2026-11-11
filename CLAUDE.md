@@ -33,6 +33,8 @@ npm run dist:linux # electron-builder --linux AppImage deb rpm → dist/SimplyRe
 | `src/main.js` (~900 lines) | Main process: window, `app://` protocol, CSP, all disk I/O (library, settings, stats, covers, stored books), backup/restore, network look-ups, IPC handlers |
 | `src/preload.js` | `contextBridge` exposing `window.api` (the only bridge between renderer and main), including `api.platform` (`'win32'`, `'linux'`) |
 | `src/zip.js` | Dependency-free zip writer/reader used by backups: `writeZip(dest, entries)` and `openZip(file)` → `{ names, has, read(name), extract(name, destFile) }`. Files are streamed in and out (a backup never has to fit in memory) and ZIP64 records are written past 4 GB or 65,535 files. CRC-checked, UTF-8 names, stores already-compressed files and deflates the rest |
+| `src/shared/rules.mjs` | Library rules shared by desktop main (through `require()`) and the Android adapter: allowed library fields, goals and stats cleaning, `portableName`, look-up URLs and the book-details search ranking. Plain ESM, no Node or DOM |
+| `mobile/` | The Android version (Capacitor). See [Android](#android) and `mobile/README.md` |
 | `src/files.js` | `rename()` that retries for a few seconds when Windows (antivirus, indexing, OneDrive) briefly locks a file |
 | `src/renderer/index.html` | All markup: library, reader, popovers, `<dialog>`s, and the inline SVG icon sprite (`<symbol id="i-…">`) |
 | `src/renderer/app.js` (~3,650 lines) | All renderer logic, split into commented sections (see below) |
@@ -224,6 +226,17 @@ Windows is the main platform and its behaviour must not change: every Linux diff
 - **Fonts:** Windows keeps the list in index.html. On Linux, `listInstalledFonts()` lists the `FONT_CANDIDATES` that are installed (sample text measured against the generic families; look-alikes that measure the same, such as Liberation Serif standing in for Times New Roman, appear once). A saved font that isn't listed is added as "(not installed)" by `showFontChoice()`.
 - **Wording and keys:** the backup hint names Dropbox or Nextcloud instead of OneDrive; Ctrl+Q quits (`before-input-event` in main).
 - **Testing:** install the packages in Fedora and Ubuntu containers (Ubuntu 24.04 stands in for Mint 22, which has no ARM build) and run them under `Xvfb`, with `--no-sandbox` when running as root. Read the window through `--remote-debugging-port`: the packaged app ignores the `SIMPLY_READER_*` test variables.
+
+## Android
+
+The Android app (`mobile/`, details in `mobile/README.md`) bundles `src/renderer`, `src/shared` and `vendor/foliate-js` unchanged into a Capacitor WebView; `mobile/web/api.js` replaces preload + main as `window.api`, on a native Java plugin. It builds on GitHub Actions (`.github/workflows/android.yml`, pushes to the `android` branch).
+
+- **Shared code:** `app.js` and `styles.css` serve both. Android differences sit behind `api.platform === 'android'`, `api.capabilities` (read into `CAN` in app.js: `folderImport`, `showInFolder`, `dragDrop`, `pageCapture`, `autoBackup`; desktop has all) and the `html.android` class for CSS. Android-only API extras are optional calls: `api.onBackButton`, `api.onPause`, `api.exitApp`, `api.setChrome`.
+- **Rules live once:** change library rules in `src/shared/rules.mjs`, not in main.js or the adapter. A new library field goes in `LIBRARY_FIELDS` there.
+- **Saves stay pending until written:** `flushPosition`, `flushBookPrefs`, `flushSettings`, `flushNotes` and `flushReading` keep what failed and retry on the next save; `flushAll()` runs when the window is hidden (and on Android's pause).
+- **Restore drops `pagination`** on both platforms: page counts depend on the fonts and window of the system that made them.
+- **Book references** on Android are `sr-book:<file name>`; ids are `sha1(ref)`. Desktop ids are unchanged.
+- **Tests:** `cd mobile && npm test` runs the adapter against a fake plugin. Run it, and the desktop smoke test, after changing shared code.
 
 ## Vendor patches
 
