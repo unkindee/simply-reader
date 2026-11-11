@@ -1090,3 +1090,5 @@ body[data-view="reader"] .bulk-bar { display: none; }
 /* dialogs fit a phone screen and scroll inside */
 .android dialog { max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow: auto; }
 .android #stats-dialog { max-height: calc(100dvh - 24px); overflow: auto; }
+/* the online search in Edit details keeps its label */
+.android .ed-find span { display: inline; }

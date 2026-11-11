@@ -338,7 +338,7 @@ const formatAuthor = a => {
   const one = c => typeof c === 'string' ? c : langMap(c?.name)
   return Array.isArray(a) ? a.map(one).filter(Boolean).join(', ') : one(a)
 }
-const baseName = p => p.split(/[\\/]/).pop()
+const baseName = p => p.replace(/^sr-book:/, '').split(/[\\/]/).pop() // Android books are "sr-book:<file name>"
 const stripExt = n => n.replace(/\.[^.]+$/, '')
 
 function toast(msg, type = '', ms = 3500) {
@@ -3798,6 +3798,7 @@ function applyCapabilities() {
   if (!CAN.pageCapture) $('#set-pageTurn').closest('.set-row').hidden = true
   if (!CAN.dragDrop) $('#lib-empty p').textContent = 'Add EPUB, MOBI, AZW3, PDF, FB2 or CBZ books from this device, or'
   if (api.platform === 'android') {
+    $('#edit-dialog .ed-hint').textContent = 'To change the cover, choose an image, or find one online.'
     $('#bk-safety').textContent = 'Save the copy made before the last restore…'
     $('#bk-safety').onclick = () => backupBusy('', async () => { await api.backup.show('safety'); $('#bk-status').textContent = '' })
     $('#bk-restore').closest('.bk-sec').querySelector('p').textContent =
