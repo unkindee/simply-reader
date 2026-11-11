@@ -5,6 +5,9 @@ const fs = require('node:fs/promises')
 const crypto = require('node:crypto')
 const { pathToFileURL, fileURLToPath } = require('node:url')
 const files = require('./files')
+// library rules shared with the Android version
+const { LIBRARY_FIELDS, cleanGoals, applyStatsAdd, portableName, numbered, isPlainName, ymd, ymdhm,
+  lookupTerm, definitionURL, wikipediaURL, coverURLAllowed, searchBookInfo } = require('./shared/rules.mjs')
 
 const SUPPORTED = ['.epub', '.mobi', '.azw3', '.azw', '.kf8', '.prc', '.fb2', '.fbz', '.cbz', '.pdf']
 const isSupported = p => SUPPORTED.includes(path.extname(p).toLowerCase())
@@ -444,8 +447,7 @@ ipcMain.handle('library-upsert', async (_e, p, data) => {
     await fs.writeFile(path.join(COVERS_DIR, id + '.jpg'), Buffer.from(data.cover.slice(data.cover.indexOf(',') + 1), 'base64'))
     data = { ...data, cover: `app://reader${COVERS_ROUTE}${id}.jpg?v=${Date.now()}` }
   }
-  const allowed = ['title', 'author', 'custom', 'customCover', 'collections', 'finishedAt', 'cover', 'coverRes', 'originalPath', 'cfi', 'fraction', 'lastOpened', 'annotations', 'bookmarks', 'chapter', 'format', 'length', 'spineColor', 'pagination', 'prefs', 'info']
-  for (const k of allowed) if (k in data) prev[k] = data[k]
+  for (const k of LIBRARY_FIELDS) if (k in data) prev[k] = data[k]
   prev.path = file
   library.books[id] = prev
   await saveLibrary().catch(logWriteError(LIBRARY_FILE))
@@ -467,9 +469,9 @@ ipcMain.handle('library-remove', async (_e, id) => {
   if (/^[0-9a-f]{16}$/.test(id)) await fs.rm(path.join(COVERS_DIR, id + '.jpg'), { force: true })
 })
 
-// ---------- dictionary / Wikipedia look-up ----------
-// Done here rather than in the window, whose content policy blocks all network access.
-// Only these two fixed Wikimedia endpoints can be reached.
+// ---------- dictionary / Wikipedia look-up, book details search ----------
+// Done here rather than in the window, whose content policy blocks all network access. Only
+// fixed hosts can be reached; the URLs and the result ranking are in src/shared/rules.mjs.
 const LOOKUP_UA = 'SimplyReader/1.0 (desktop e-book reader; Electron)'
 async function fetchJSON(url) {
   const res = await net.fetch(url, { headers: { 'Api-User-Agent': LOOKUP_UA, 'User-Agent': LOOKUP_UA, Accept: 'application/json' } })
@@ -477,72 +479,22 @@ async function fetchJSON(url) {
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }
-const lookupTerm = t => String(t ?? '').replace(/\s+/g, ' ').trim().slice(0, 120)
 ipcMain.handle('lookup-definition', async (_e, word) => {
   word = lookupTerm(word)
   if (!word) return null
-  return fetchJSON(`https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(word)}?redirect=true`)
+  return fetchJSON(definitionURL(word))
 })
 ipcMain.handle('lookup-wikipedia', async (_e, title, lang) => {
   title = lookupTerm(title)
   if (!title) return null
-  lang = /^[a-z]{2,3}$/.test(lang) ? lang : 'en'
-  return fetchJSON(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, '_'))}?redirect=true`)
+  return fetchJSON(wikipediaURL(title, lang))
 })
-
-// ---------- book details search (Edit details → Find online) ----------
-// Apple Books has large, clean covers; Open Library adds other editions and older books.
-const enc = encodeURIComponent
-const appleArt = (url, size) => url?.replace(/\/\d+x\d+bb\.(jpg|png)$/, `/${size}bb.jpg`) ?? null
-const fromApple = r => ({
-  source: 'Apple Books', title: r.trackName, author: r.artistName, year: r.releaseDate?.slice(0, 4),
-  thumb: appleArt(r.artworkUrl100, '300x300'), cover: appleArt(r.artworkUrl100, '1600x1600'),
-})
-const OL_FIELDS = 'key,title,author_name,cover_i,first_publish_year'
-const fromOpenLibrary = d => ({
-  source: 'Open Library', title: d.title, author: d.author_name?.slice(0, 2).join(', '), year: d.first_publish_year,
-  thumb: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg?default=false` : null,
-  cover: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg?default=false` : null,
-})
-const normText = t => String(t ?? '').toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
-ipcMain.handle('search-book-info', async (_e, opts = {}) => {
-  const title = lookupTerm(opts.title), author = lookupTerm(opts.author)
-  const query = lookupTerm(opts.query) || `${title} ${author}`.trim()
-  if (!query) return []
-  const tasks = [
-    fetchJSON(`https://itunes.apple.com/search?media=ebook&entity=ebook&limit=15&term=${enc(query)}`)
-      .then(r => (r?.results ?? []).map(fromApple)),
-    fetchJSON(`https://openlibrary.org/search.json?q=${enc(query)}&limit=12&fields=${OL_FIELDS}`)
-      .then(r => (r?.docs ?? []).map(fromOpenLibrary)),
-  ]
-  if (title && author) tasks.push(
-    fetchJSON(`https://openlibrary.org/search.json?title=${enc(title)}&author=${enc(author)}&limit=8&fields=${OL_FIELDS}`)
-      .then(r => (r?.docs ?? []).map(fromOpenLibrary)))
-  const settled = await Promise.allSettled(tasks)
-  if (settled.every(s => s.status === 'rejected')) throw new Error('offline')
-  // best matches first: how many of the searched words appear in the title and author
-  const words = normText(query).split(' ').filter(w => w.length > 1)
-  const seen = new Set()
-  return settled.flatMap(s => s.status === 'fulfilled' ? s.value : [])
-    .filter(r => r.title)
-    .map((r, i) => {
-      const text = normText(`${r.title} ${r.author ?? ''}`)
-      return { ...r, score: words.filter(w => text.includes(w)).length + (r.cover ? 0.5 : 0), order: i }
-    })
-    .sort((a, b) => b.score - a.score || a.order - b.order)
-    .filter(r => {
-      const k = `${normText(r.title)}|${normText(r.author)}|${r.cover ?? ''}`
-      return !seen.has(k) && seen.add(k)
-    })
-    .slice(0, 24)
-    .map(({ score, order, ...r }) => r)
-})
-// cover images for the results: only from the two services above
+// Edit details → Find online
+ipcMain.handle('search-book-info', (_e, opts = {}) => searchBookInfo(opts, fetchJSON))
+// cover images for the results: only from the two services searched
 ipcMain.handle('fetch-cover-image', async (_e, url) => {
-  const u = new URL(String(url))
-  if (u.protocol !== 'https:' || !/^(is\d+-ssl\.mzstatic\.com|covers\.openlibrary\.org)$/.test(u.hostname))
-    throw new Error('Image host not allowed')
-  const res = await net.fetch(u.href, { headers: { 'User-Agent': LOOKUP_UA } })
+  if (!coverURLAllowed(url)) throw new Error('Image host not allowed')
+  const res = await net.fetch(new URL(String(url)).href, { headers: { 'User-Agent': LOOKUP_UA } })
   if (!res.ok) return null
   const type = res.headers.get('content-type') ?? ''
   if (!type.startsWith('image/')) return null
@@ -562,15 +514,7 @@ const loadStats = () => (statsLoad ??= ready().then(() => readJSON(STATS_FILE, {
 ipcMain.handle('stats-get', () => loadStats())
 ipcMain.handle('stats-add', async (_e, add) => {
   await loadStats()
-  const day = String(add?.day ?? '')
-  const ms = Math.max(0, Math.min(Number(add?.ms) || 0, 6 * 3600e3))
-  const pages = Math.max(0, Math.min(Math.round(Number(add?.pages) || 0), 10000))
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || (!ms && !pages)) return stats
-  const d = (stats.days[day] ??= { ms: 0, pages: 0 })
-  d.ms += ms
-  d.pages += pages
-  if (typeof add.bookId === 'string' && /^[0-9a-f]{16}$/.test(add.bookId))
-    stats.books[add.bookId] = (stats.books[add.bookId] ?? 0) + ms
+  if (!applyStatsAdd(stats, add)) return stats // clamped: at most 6 hours and 10,000 pages a call
   await saveJSON(STATS_FILE, stats)
   return stats
 })
@@ -584,22 +528,9 @@ const AUTO_EVERY = 7 * 24 * 3600e3
 const AUTO_KEEP = 5
 const AUTO_NAME = /^Simply Reader auto-backup \d{4}-\d{2}-\d{2}\.zip$/
 let uiPrefs = null // the window's view preferences, included in backups
-const pad2 = n => String(n).padStart(2, '0')
-const ymd = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
-const ymdhm = (d = new Date()) => `${ymd(d)} ${pad2(d.getHours())}.${pad2(d.getMinutes())}`
 const backupConfig = () => (settings.backup ??= {})
-// A book's file name inside a backup, chosen so the backup restores on any system: Windows
-// forbids <>:"/\|?* and control characters, and device names such as CON or NUL, which
-// Linux allows. Names that come from Windows never contain these, so they don't change.
-const portableName = name => {
-  const ext = path.extname(name)
-  let stem = name.slice(0, name.length - ext.length).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
-  if (!stem || /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\.|$)/i.test(stem)) stem = '_' + stem
-  return stem + ext
-}
-const numbered = (name, n) => { const ext = path.extname(name); return `${name.slice(0, name.length - ext.length)} (${n})${ext}` }
-// a backup's book entry is one plain file name, never a path
-const isPlainName = n => typeof n === 'string' && n !== '' && n !== '.' && n !== '..' && !/[/\\\x00]/.test(n)
+// Book names in a backup go through portableName() (src/shared/rules.mjs), so a backup made
+// on Linux or Android restores on Windows and the other way round.
 
 // one backup or restore at a time: the weekly timer, "Back up now" and "Restore" never read
 // files that another job is writing or deleting (or write the same .part file)
@@ -695,6 +626,8 @@ async function stageRestore(bk) {
     const id = bookId(p)
     const e = { ...entry, id, path: p }
     delete e.missing
+    // page counts depend on the fonts and window size of the system that made them: counted again
+    delete e.pagination
     const cover = `covers/${oldId}.jpg`
     if (/^[0-9a-f]{16}$/.test(oldId) && bk.zip.has(cover)) {
       await bk.zip.extract(cover, path.join(stagedCovers, id + '.jpg'))
@@ -915,8 +848,6 @@ ipcMain.handle('settings-set', async (_e, reader) => {
 })
 
 // reading goals: minutes a day and books a year (null = no goal)
-const goalNum = (v, max) => Number.isInteger(v) && v >= 1 && v <= max ? v : null
-const cleanGoals = g => ({ dailyMinutes: goalNum(g?.dailyMinutes, 1440), yearBooks: goalNum(g?.yearBooks, 1000) })
 ipcMain.handle('goals-get', async () => cleanGoals((await loadSettings()).goals))
 ipcMain.handle('goals-set', async (_e, goals) => {
   await loadSettings()

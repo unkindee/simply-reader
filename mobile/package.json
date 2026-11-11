@@ -1,0 +1,20 @@
+{
+  "name": "simply-reader-android",
+  "version": "1.0.2",
+  "private": true,
+  "description": "Android build of Simply Reader (Capacitor shell around the shared renderer)",
+  "license": "MIT",
+  "scripts": {
+    "prepare-web": "node scripts/prepare-web.mjs",
+    "sync": "node scripts/prepare-web.mjs && cap sync android",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.6.0",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.6.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.0"
+  }
+}

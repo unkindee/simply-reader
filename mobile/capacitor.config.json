@@ -1,0 +1,19 @@
+{
+  "appId": "io.github.unkindee.simplyreader",
+  "appName": "Simply Reader",
+  "webDir": "www",
+  "loggingBehavior": "debug",
+  "server": {
+    "androidScheme": "https",
+    "appStartPath": "/src/renderer/index.html"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": false
+  },
+  "plugins": {
+    "CapacitorHttp": { "enabled": false },
+    "CapacitorCookies": { "enabled": false },
+    "SystemBars": { "insetsHandling": "css", "style": "DEFAULT" }
+  }
+}

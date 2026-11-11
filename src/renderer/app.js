@@ -4,6 +4,9 @@ import * as CFI from '../../vendor/foliate-js/epubcfi.js'
 import { FootnoteHandler } from '../../vendor/foliate-js/footnotes.js'
 
 const api = window.api
+// What this platform can do. Desktop has everything; Android (mobile/web/api.js) leaves out a
+// few desktop features, whose controls are hidden (see applyCapabilities).
+const CAN = { folderImport: true, showInFolder: true, dragDrop: true, pageCapture: true, autoBackup: true, ...api.capabilities }
 const $ = s => document.querySelector(s)
 const $$ = s => [...document.querySelectorAll(s)]
 const el = (tag, props = {}, ...children) => {
@@ -127,14 +130,27 @@ let G = { ...DEFAULTS }
 let bookPrefs = {}
 const mergeSettings = () => { S = { ...G, ...bookPrefs } }
 const pickBookPrefs = o => Object.fromEntries(Object.entries(o ?? {}).filter(([k]) => BOOK_KEYS.includes(k)))
-const saveSettings = debounce(() => api.settings.set(G), 300)
+// Pending saves are only dropped once they are written: a failed write stays pending and is
+// tried again with the next save (flushAll runs when the app is hidden).
+let settingsPending = false
+const saveSettingsSoon = debounce(flushSettings, 300)
+const saveSettings = () => { settingsPending = true; saveSettingsSoon() }
+function flushSettings() {
+  saveSettingsSoon.cancel()
+  if (!settingsPending) return undefined
+  settingsPending = false
+  return api.settings.set(G).catch(e => { console.error(e); settingsPending = true })
+}
 let bookPrefsPending = null
 const saveBookPrefsSoon = debounce(flushBookPrefs, 300)
 function flushBookPrefs() {
   saveBookPrefsSoon.cancel()
   const p = bookPrefsPending
   bookPrefsPending = null
-  return p ? api.library.upsert(p.path, { prefs: p.prefs }).catch(console.error) : undefined
+  return p ? api.library.upsert(p.path, { prefs: p.prefs }).catch(e => {
+    console.error(e)
+    bookPrefsPending ??= p // unless newer settings are already waiting
+  }) : undefined
 }
 function storeBookPrefs() {
   const prefs = { ...bookPrefs }
@@ -175,6 +191,7 @@ function configureRenderer(r, flow) {
 
 function applySettings() {
   document.body.dataset.theme = S.theme
+  syncChrome()
   document.body.classList.toggle('pdf-dark', !!S.pdfDark)
   if (view?.isFixedLayout) view.renderer.setAttribute('zoom', String(S.pdfZoom))
   $('#reader').classList.toggle('scrolled', S.flow === 'scrolled')
@@ -185,6 +202,19 @@ function applySettings() {
   schedulePagination()
 }
 const applySettingsPerFrame = perFrame(applySettings)
+// Android: the status and navigation bars take the theme's background colour
+let chromeKey = ''
+function syncChrome() {
+  if (!api.setChrome) return
+  const rgb = getComputedStyle(document.body).backgroundColor.match(/\d+/g)
+  if (!rgb) return
+  const bg = '#' + rgb.slice(0, 3).map(n => (+n).toString(16).padStart(2, '0')).join('')
+  const dark = !!(THEMES[S.theme] ?? THEMES.dark).dark
+  if (chromeKey === bg + dark) return
+  chromeKey = bg + dark
+  api.setChrome({ bg, dark })
+}
+if (api.setChrome) addEventListener('resize', debounce(() => { chromeKey = ''; syncChrome() }, 300)) // rotating resets the bars
 const setSetting = (k, v) => { assignSetting(k, v); applySettings() }
 
 // segmented controls: setting key -> [container, value parser]
@@ -1586,8 +1616,12 @@ function addReading(ms, pages) {
 function flushReading() {
   const p = readPending
   readPending = { ms: 0, pages: 0, day: null, bookId: null }
-  if (!p.day || (!p.ms && !p.pages)) return
-  api.stats.add(p).catch(e => console.warn('stats', e))
+  if (!p.day || (!p.ms && !p.pages)) return undefined
+  return api.stats.add(p).catch(e => {
+    console.warn('stats', e)
+    const r = readPending // put it back, if what's pending now is for the same day and book
+    if (!r.day || (r.day === p.day && r.bookId === p.bookId)) Object.assign(r, { day: p.day, bookId: p.bookId, ms: r.ms + p.ms, pages: r.pages + p.pages })
+  })
 }
 setInterval(() => {
   if (!current || document.hidden || document.body.dataset.view !== 'reader') return
@@ -1926,7 +1960,10 @@ $('#bk-restore').onclick = () => backupBusy('Reading the backup…', async () =>
   const now = Object.keys(libCache).length
   const when = pick.created ? ` from ${fmtWhen(pick.created)}` : ''
   // an empty library has nothing to lose, so don't ask
-  if (now && !confirm(`Restore the backup${when} with ${plural(pick.books, 'book')}?\n\nIt replaces your current library (${plural(now, 'book')}). A copy of the current library is saved first, so you can go back to it.`)) {
+  const question = api.platform === 'android'
+    ? `Replace this device’s library with the backup${when} (${plural(pick.books, 'book')})?\n\nThe library here (${plural(now, 'book')}) is replaced, not merged: its reading progress, highlights and notes are replaced too. A copy of it is saved first.`
+    : `Restore the backup${when} with ${plural(pick.books, 'book')}?\n\nIt replaces your current library (${plural(now, 'book')}). A copy of the current library is saved first, so you can go back to it.`
+  if (now && !confirm(question)) {
     $('#bk-status').textContent = ''
     return
   }
@@ -2119,15 +2156,37 @@ function queuePosition(data) {
 async function flushPosition() {
   flushPositionSoon.cancel()
   if (!pendingPos) return
-  const { path, data } = pendingPos
+  const p = pendingPos
   pendingPos = null
-  const entry = await api.library.upsert(path, data)
-  libCache[entry.id] = entry
+  try {
+    const entry = await api.library.upsert(p.path, p.data)
+    libCache[entry.id] = entry
+  } catch (e) {
+    console.error('position not saved', e)
+    if (!/not found/i.test(e?.message)) pendingPos ??= p // tried again with the next save
+  }
 }
-const persistNotes = () => current && api.library.upsert(current.path, {
-  annotations: annotations.map(({ index, ...a }) => a),
-  bookmarks,
-})
+// highlights, notes and bookmarks: a failed save is kept and tried again (flushNotes)
+let notesPending = null
+function persistNotes() {
+  if (!current) return undefined
+  notesPending = { path: current.path, data: { annotations: annotations.map(({ index, ...a }) => a), bookmarks: [...bookmarks] } }
+  return flushNotes()
+}
+function flushNotes() {
+  const p = notesPending
+  notesPending = null
+  return p ? api.library.upsert(p.path, p.data).catch(e => {
+    console.error('notes not saved', e)
+    if (!notesPending) { notesPending = p; toast('Couldn’t save your notes. They’ll be saved again shortly.', 'error', 5000) }
+  }) : undefined
+}
+// everything pending, e.g. when the app goes to the background: Android may stop it any time after
+function flushAll() {
+  return Promise.allSettled([flushPosition(), flushBookPrefs(), flushSettings(), flushNotes(), flushReading()])
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushAll() })
+api.onPause?.(flushAll)
 window.addEventListener('beforeunload', () => { if (pendingPos) api.library.upsert(pendingPos.path, pendingPos.data); flushReading() })
 
 // ----- relocation
@@ -2617,7 +2676,7 @@ function navigateAndSettle(side) {
 async function turnPage(side) {
   if (!view) return
   const effect = S.pageTurn
-  if (effect === 'none' || S.flow !== 'paginated' || matchMedia('(prefers-reduced-motion: reduce)').matches)
+  if (effect === 'none' || !CAN.pageCapture || S.flow !== 'paginated' || matchMedia('(prefers-reduced-motion: reduce)').matches)
     return navSide(side)
   if (pageCapturing) return
   pageAnim?.finish()
@@ -3674,7 +3733,14 @@ document.addEventListener('keydown', handleKey)
 // ----- open / drop
 async function openDialog() {
   const paths = await api.chooseFiles()
+  reportRejected(paths)
   if (paths.length) handlePaths(paths)
+}
+// Android imports files as they're picked; the ones it couldn't take come back as paths.rejected
+function reportRejected(paths) {
+  const bad = paths?.rejected ?? []
+  if (bad.length) toast(bad.length === 1 ? `Couldn’t add ${bad[0].name}: ${bad[0].error}`
+    : `Couldn’t add ${plural(bad.length, 'file')} (${bad[0].error})`, 'error', 6000)
 }
 async function importFolder() {
   showLoading('Scanning folder…')
@@ -3703,9 +3769,43 @@ function onDrop(e) {
   if (paths.length) handlePaths(paths)
 }
 
-api.onOpenFiles(paths => handlePaths(paths))
+api.onOpenFiles(paths => {
+  reportRejected(paths)
+  if (paths.length || !paths.rejected?.length) handlePaths(paths)
+})
+
+// ----- Android's Back: closes the topmost thing first, then the book, then leaves the app
+function handleBack() {
+  const dlg = $$('dialog[open]').at(-1)
+  if (dlg) { if (!dlg.classList.contains('busy')) dlg.close(); return }
+  const libPops = ['#card-menu', '#coll-pop', '#chip-menu', '#theme-pop'].some(s => $(s) && !$(s).hidden)
+  if (anyOverlayOpen() || libPops) { hidePopovers(); closePanels(); return }
+  if (document.body.dataset.view === 'reader' && view) {
+    if ($('#reader').classList.contains('immersive')) toggleFullscreen(false)
+    else backToLibrary()
+    return
+  }
+  if (listSel.size) { clearListSelection(); return }
+  flushAll().finally(() => api.exitApp?.())
+}
+api.onBackButton?.(handleBack)
+
+// hide what this platform can't do (see CAN)
+function applyCapabilities() {
+  if (!CAN.folderImport) $$('#lib-import, [data-action="import"]').forEach(e => { e.hidden = true })
+  if (!CAN.showInFolder) $$('#card-menu [data-cm="folder"]').forEach(e => { e.hidden = true })
+  if (!CAN.autoBackup) $('#bk-auto').closest('.bk-sec').hidden = true
+  if (!CAN.pageCapture) $('#set-pageTurn').closest('.set-row').hidden = true
+  if (!CAN.dragDrop) $('#lib-empty p').textContent = 'Add EPUB, MOBI, AZW3, PDF, FB2 or CBZ books from this device, or'
+  if (api.platform === 'android') {
+    $('#bk-safety').textContent = 'Save the copy made before the last restore…'
+    $('#bk-restore').closest('.bk-sec').querySelector('p').textContent =
+      'Replaces the library on this device with the one in a backup file; nothing is merged. The library here is saved first, so you can go back to it.'
+  }
+}
 
 // ---------------------------------------------------------------- boot
+applyCapabilities()
 ;(async () => {
   try { const s = localStorage.getItem('sort'); if (s) $('#lib-sort').value = s } catch {}
   // fonts are only needed once a book opens, so they load alongside the library instead of before it
@@ -3720,6 +3820,7 @@ api.onOpenFiles(paths => handlePaths(paths))
   applySettings()
   await fontsReady
   const pending = await api.getPendingFiles()
+  reportRejected(pending)
   if (pending.length) handlePaths(pending)
   setTimeout(upgradeCovers, 3000) // after startup settles
   api.backup.setPrefs(uiPrefs()) // so automatic backups include the view choices
