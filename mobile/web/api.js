@@ -15,6 +15,33 @@ const SR = Cap.registerPlugin('SimplyReader')
 const App = Cap.registerPlugin('App')
 document.documentElement.classList.add('android')
 
+// The reader needs Chromium 117 or later (Object.groupBy, color-mix(), :has()). Android's
+// System WebView updates on its own; when it's older, say so instead of failing oddly.
+const MIN_CHROMIUM = 117
+function webViewTooOld(ua = navigator.userAgent, min = MIN_CHROMIUM) {
+  const v = +(/Chrome\/(\d+)/.exec(ua)?.[1] ?? 0)
+  return v > 0 && v < min ? v : 0
+}
+function showWebViewTooOld(version) {
+  const box = document.createElement('div')
+  box.setAttribute('role', 'alert')
+  box.style.cssText = 'position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:24px;background:#1d1d21;color:#e0dcd4;font:16px/1.5 system-ui,sans-serif;text-align:center'
+  const inner = document.createElement('div')
+  inner.style.maxWidth = '420px'
+  const h = document.createElement('h1')
+  h.style.cssText = 'font-size:22px;margin:0 0 12px'
+  h.textContent = 'Update Android System WebView'
+  const p = document.createElement('p')
+  p.textContent = `Simply Reader needs a newer Android System WebView (version ${MIN_CHROMIUM} or later; this device has ${version}). Update it in the Play Store, then open Simply Reader again.`
+  inner.append(h, p)
+  box.append(inner)
+  document.body.append(box)
+}
+{
+  const old = webViewTooOld()
+  if (old) document.addEventListener('DOMContentLoaded', () => showWebViewTooOld(old))
+}
+
 // ---------------------------------------------------------------- storage
 let dirs = null // { filesDir, cacheDir }
 const info = () => (dirs ??= SR.info())
@@ -520,4 +547,4 @@ window.api = {
 }
 
 // test hooks for the debug build (driven over the DevTools protocol; harmless otherwise)
-window.__srAndroid = { info: () => info(), version: () => SR.info() }
+window.__srAndroid = { info: () => info(), webViewTooOld, showWebViewTooOld }

@@ -41,18 +41,29 @@ jobs:
           java-version: 21
           cache: gradle
 
-      - name: Debug signing key (kept between runs so updates install over each other)
-        uses: actions/cache@v4
+      # the debug key is kept between runs so debug builds install over each other; it's saved
+      # as soon as it's made, so a later failing step can't lose it
+      - name: Restore the debug signing key
+        id: debugkey
+        uses: actions/cache/restore@v4
         with:
           path: ~/sr-debug.keystore
           key: sr-debug-keystore-v1
 
-      - name: Create the debug key if there is none yet
+      - name: Create the debug signing key
+        if: steps.debugkey.outputs.cache-hit != 'true'
         run: |
-          if [ ! -f ~/sr-debug.keystore ]; then
-            keytool -genkeypair -keystore ~/sr-debug.keystore -storepass android -keypass android               -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
-          fi
-          echo "SR_DEBUG_KEYSTORE=$HOME/sr-debug.keystore" >> "$GITHUB_ENV"
+          keytool -genkeypair -keystore ~/sr-debug.keystore -storepass android -keypass android             -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
+
+      - name: Save the debug signing key
+        if: steps.debugkey.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/sr-debug.keystore
+          key: sr-debug-keystore-v1
+
+      - run: echo "SR_DEBUG_KEYSTORE=$HOME/sr-debug.keystore" >> "$GITHUB_ENV"
+        working-directory: .
 
       - run: npm ci
 

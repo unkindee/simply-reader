@@ -305,3 +305,11 @@ test('removing a book deletes its stored copy and cover', async () => {
   assert.ok(!fs.existsSync(path.join(FILES, 'covers', id + '.jpg')))
   assert.deepEqual(readLib().books, {})
 })
+
+test('an old WebView is detected', async () => {
+  await loadApi()
+  const { webViewTooOld } = globalThis.__srAndroid
+  assert.equal(webViewTooOld('Mozilla/5.0 (Linux; Android 9) Chrome/129.0.6668.70 Mobile Safari/537.36'), 0)
+  assert.equal(webViewTooOld('Mozilla/5.0 (Linux; Android 8) Chrome/96.0.4664.104 Mobile Safari/537.36'), 96)
+  assert.equal(webViewTooOld('no chrome here'), 0)
+})

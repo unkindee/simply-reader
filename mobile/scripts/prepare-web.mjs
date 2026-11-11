@@ -38,6 +38,13 @@ copy(path.join(ROOT, 'vendor/foliate-js'), path.join(WWW, 'vendor/foliate-js'))
 copy(path.join(MOBILE, 'web'), path.join(WWW, 'src/android'))
 fs.copyFileSync(path.join(MOBILE, 'node_modules/@capacitor/core/dist/capacitor.js'), path.join(WWW, 'src/android/capacitor.js'))
 
+// pdf.js needs a few recent JavaScript features that older Android WebViews lack
+const polyfills = fs.readFileSync(path.join(MOBILE, 'scripts/pdfjs-polyfills.js'), 'utf8')
+for (const f of ['pdf.mjs', 'pdf.worker.mjs']) {
+  const file = path.join(WWW, 'vendor/foliate-js/vendor/pdfjs', f)
+  fs.writeFileSync(file, polyfills + '\n' + fs.readFileSync(file, 'utf8'))
+}
+
 const indexFile = path.join(WWW, 'src/renderer/index.html')
 let html = fs.readFileSync(indexFile, 'utf8')
 const must = (find, replace) => {
