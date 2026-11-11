@@ -206,9 +206,10 @@ const applySettingsPerFrame = perFrame(applySettings)
 let chromeKey = ''
 function syncChrome() {
   if (!api.setChrome) return
-  const rgb = getComputedStyle(document.body).backgroundColor.match(/\d+/g)
-  if (!rgb) return
-  const bg = '#' + rgb.slice(0, 3).map(n => (+n).toString(16).padStart(2, '0')).join('')
+  // the theme token, not the body's colour, which is still mid-transition right after a change
+  let bg = getComputedStyle(document.body).getPropertyValue('--bg').trim().toLowerCase()
+  if (/^#[0-9a-f]{3}$/.test(bg)) bg = '#' + [...bg.slice(1)].map(c => c + c).join('')
+  if (!/^#[0-9a-f]{6}$/.test(bg)) return
   const dark = !!(THEMES[S.theme] ?? THEMES.dark).dark
   if (chromeKey === bg + dark) return
   chromeKey = bg + dark
