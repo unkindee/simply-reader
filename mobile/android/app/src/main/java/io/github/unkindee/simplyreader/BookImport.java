@@ -67,6 +67,12 @@ final class BookImport {
         } catch (Exception ignored) {
             // some providers don't answer; fall back to the URI
         }
+        if (name == null) {
+            // some providers (the media store, for one) don't give a display name but do give a path
+            try (Cursor c = cr.query(uri, new String[] { "_data" }, null, null, null)) {
+                if (c != null && c.moveToFirst() && !c.isNull(0)) name = new java.io.File(c.getString(0)).getName();
+            } catch (Exception ignored) {}
+        }
         if (name == null) name = uri.getLastPathSegment();
         if (name == null || name.trim().isEmpty()) name = "Book";
         name = name.trim();
