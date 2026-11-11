@@ -1078,3 +1078,15 @@ body[data-view="reader"] .bulk-bar { display: none; }
 
 /* a button that has nothing to do yet (e.g. "Back up now" with an empty library) */
 .btn:disabled { opacity: .5; cursor: default; pointer-events: none; }
+
+/* ---------- Android (html.android is set by mobile/web/api.js; desktop never has it) ---------- */
+/* touch screens turn pages by tapping the sides or swiping: no hover arrows over the text */
+.android .edge-nav { display: none; }
+/* nothing appears on hover: the card's menu button is always there */
+.android .card .more { opacity: 1; }
+/* the empty library's buttons keep their labels, wrapping if they must */
+.android .empty-actions { flex-wrap: wrap; padding: 0 16px; }
+.android .empty-actions .btn span { display: inline; }
+/* dialogs fit a phone screen and scroll inside */
+.android dialog { max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow: auto; }
+.android #stats-dialog { max-height: calc(100dvh - 24px); overflow: auto; }

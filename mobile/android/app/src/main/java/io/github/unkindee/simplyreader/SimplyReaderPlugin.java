@@ -561,6 +561,11 @@ public class SimplyReaderPlugin extends Plugin {
                 Window w = getActivity().getWindow();
                 int color = Color.parseColor(bg);
                 w.getDecorView().setBackgroundColor(color);
+                // before Android 15 the bars have their own colour (later they're transparent)
+                if (Build.VERSION.SDK_INT < 35) {
+                    w.setStatusBarColor(color);
+                    w.setNavigationBarColor(color);
+                }
                 WebView web = getBridge().getWebView();
                 if (web != null) web.setBackgroundColor(color);
                 WindowInsetsControllerCompat c = WindowCompat.getInsetsController(w, w.getDecorView());

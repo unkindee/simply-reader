@@ -3799,6 +3799,7 @@ function applyCapabilities() {
   if (!CAN.dragDrop) $('#lib-empty p').textContent = 'Add EPUB, MOBI, AZW3, PDF, FB2 or CBZ books from this device, or'
   if (api.platform === 'android') {
     $('#bk-safety').textContent = 'Save the copy made before the last restore…'
+    $('#bk-safety').onclick = () => backupBusy('', async () => { await api.backup.show('safety'); $('#bk-status').textContent = '' })
     $('#bk-restore').closest('.bk-sec').querySelector('p').textContent =
       'Replaces the library on this device with the one in a backup file; nothing is merged. The library here is saved first, so you can go back to it.'
   }
