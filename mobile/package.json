@@ -7,7 +7,7 @@
   "scripts": {
     "prepare-web": "node scripts/prepare-web.mjs",
     "sync": "node scripts/prepare-web.mjs && cap sync android",
-    "test": "node --test test/"
+    "test": "node --test \"test/**/*.test.mjs\""
   },
   "dependencies": {
     "@capacitor/android": "8.6.0",
