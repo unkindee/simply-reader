@@ -51,6 +51,7 @@ const DEFAULTS = {
   gap: 6, maxWidth: 720, flow: 'paginated', columns: 2, pageTurn: 'flip',
   justify: true, hyphenate: true, override: true, pageNumbers: true,
   footerAuto: true, // progress footer hidden until the pointer is over it
+  bookLayout: true, // two-page spreads drawn as an open book on a desk (see syncBookLayout)
   pdfZoom: 'fit-page', pdfDark: false, // fixed-layout pages: 'fit-page' | 'fit-width' | scale number
 }
 const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4]
@@ -121,7 +122,7 @@ aside[epub|type~="note"], aside[epub|type~="rearnote"] { display: none; }
 `
 }
 
-// Each book keeps its own text and page settings; theme, page turn and the footer are shared.
+// Each book keeps its own text and page settings; theme, page turn, the book layout and the footer are shared.
 // G holds the defaults (settings.json); bookPrefs holds the open book's own choices
 // (saved with the book in the library); S is what's in effect: { ...G, ...bookPrefs }.
 const BOOK_KEYS = ['fontFamily', 'fontSize', 'lineHeight', 'gap', 'maxWidth', 'flow', 'columns',
@@ -183,7 +184,7 @@ function syncScopeUI() {
 function configureRenderer(r, flow) {
   r.setAttribute('flow', flow)
   r.setAttribute('gap', S.gap + '%')
-  r.setAttribute('margin', '28px')
+  r.setAttribute('margin', bookLayoutOn ? BOOK_MARGIN : '28px')
   r.setAttribute('max-inline-size', S.maxWidth + 'px')
   r.setAttribute('max-column-count', String(S.columns))
   r.setStyles?.(bookCSS(S))
@@ -195,6 +196,7 @@ function applySettings() {
   document.body.classList.toggle('pdf-dark', !!S.pdfDark)
   if (view?.isFixedLayout) view.renderer.setAttribute('zoom', String(S.pdfZoom))
   $('#reader').classList.toggle('scrolled', S.flow === 'scrolled')
+  syncBookLayout()
   syncFooterButton()
   syncSettingsUI()
   if (!view?.renderer) return
@@ -220,10 +222,9 @@ const setSetting = (k, v) => { assignSetting(k, v); applySettings() }
 
 // segmented controls: setting key -> [container, value parser]
 const SEGMENTS = {
-  flow: ['#set-flow', String], columns: ['#set-columns', Number],
-  pageTurn: ['#set-pageTurn', String], pdfZoom: ['#set-pdfFit', String],
+  flow: ['#set-flow', String], columns: ['#set-columns', Number], pdfZoom: ['#set-pdfFit', String],
 }
-const CHECKBOXES = ['justify', 'hyphenate', 'override', 'pageNumbers', 'pdfDark']
+const CHECKBOXES = ['justify', 'hyphenate', 'override', 'pageNumbers', 'pdfDark', 'bookLayout']
 
 // Font menu. Windows has the fonts listed in index.html. Elsewhere (Linux) installed fonts
 // vary by distribution, so the menu lists the candidates below that are actually there. The
@@ -284,6 +285,7 @@ function syncSettingsUI() {
   for (const [k, [sel, parse]] of Object.entries(SEGMENTS))
     $$(sel + ' button').forEach(b => b.classList.toggle('active', parse(b.dataset.val) === parse(S[k])))
   for (const k of CHECKBOXES) $('#set-' + k).checked = !!S[k]
+  $('#set-pageTurn').value = S.pageTurn
   $('#out-zoom').value = typeof S.pdfZoom === 'number' ? `${Math.round(S.pdfZoom * 100)}%` : 'Fit'
   syncScopeUI()
 }
@@ -315,6 +317,7 @@ function initSettingsUI() {
     $$(sel + ' button').forEach(b => b.onclick = () => setSetting(k, parse(b.dataset.val)))
   $$('[data-zoom]').forEach(b => b.onclick = () => zoomStep(+b.dataset.zoom))
   for (const k of CHECKBOXES) $('#set-' + k).onchange = e => setSetting(k, e.target.checked)
+  $('#set-pageTurn').onchange = e => setSetting('pageTurn', e.target.value)
   $('#set-reset').onclick = () => {
     if (current && Object.keys(bookPrefs).length) { bookPrefs = {}; storeBookPrefs() }
     else { G = { ...DEFAULTS, theme: G.theme }; saveSettings() }
@@ -2097,6 +2100,7 @@ async function openBook(path) {
 
     applySettings()
     showView('reader')
+    syncBookLayout() // the stage has its size only now that the reader is shown
     await view.init({ lastLocation: entry.cfi || null })
     schedulePagination(300)
     view.renderer.focusView?.()
@@ -2133,6 +2137,7 @@ async function closeBook() {
   try { view.close() } catch (e) { console.error(e) }
   view.remove()
   view = null; current = null; lastLoc = null; annotations = []; bookmarks = []; linkFollowed = false
+  syncBookLayout()
   pagerJob++; pager = null; pagerCache = new Map(); clearTimeout(pagerTimer)
   fxlLayers = []
   document.body.classList.remove('fxl', 'is-pdf')
@@ -2200,6 +2205,8 @@ function onRelocate(e) {
   const { fraction = 0, tocItem, time } = d
   if (!sliderDragging) $('#progress').value = fraction
   $('#chapter-title').textContent = tocItem?.label?.trim() || current?.author || ''
+  updateRunningHeads()
+  syncPageEdges(fraction)
   updatePageNumbers()
   sampleReadingSpeed(fraction)
   noteReading(fraction)
@@ -2223,9 +2230,9 @@ let pagerTimer = null
 const wait = ms => new Promise(r => setTimeout(r, ms))
 
 function layoutKey() {
-  const r = $('#stage').getBoundingClientRect()
+  const r = $('#view-host').getBoundingClientRect()
   return JSON.stringify(['cols', Math.round(r.width), Math.round(r.height), S.fontFamily, S.fontSize,
-    S.lineHeight, S.gap, S.maxWidth, S.columns, S.justify, S.hyphenate])
+    S.lineHeight, S.gap, S.maxWidth, S.columns, S.justify, S.hyphenate, ...bookLayoutOn ? ['book', BOOK_MARGIN] : []])
 }
 
 // Pages a section really fills. A chapter that ends in the left column of a two-page
@@ -2277,7 +2284,7 @@ async function runPagination() {
   setPager(key, pages, false, 0)
   updatePageNumbers()
 
-  const r = $('#stage').getBoundingClientRect()
+  const r = $('#view-host').getBoundingClientRect()
   const host = el('div', { 'aria-hidden': 'true' })
   host.style.cssText = `position:fixed;left:-40000px;top:0;width:${r.width}px;height:${r.height}px;visibility:hidden;pointer-events:none;contain:strict;`
   document.body.append(host)
@@ -2378,7 +2385,56 @@ function updatePageNumbers() {
 
 const savePaginationSoon = debounce((path, pagination) => api.library.upsert(path, { pagination }), 2000)
 
-new ResizeObserver(() => { if (view) schedulePagination(700) }).observe($('#stage'))
+// the paper is resized a frame later: resizing it inside this callback would re-trigger the paginator's own observer
+new ResizeObserver(() => { if (view) { requestAnimationFrame(syncBookLayout); schedulePagination(700) } }).observe($('#stage'))
+
+// ----- book layout: a two-page spread is drawn as an open book lying on a desk
+// Paginated, reflowable books only, when two pages are shown side by side. The paper is
+// #view-host itself, sized here (the paginator fills it with the book's background colour,
+// which is the theme's --bg, so there is no seam). When the spread would collapse to one
+// column the full-stage layout is kept instead of squeezing the book.
+const BOOK_MARGIN = '44px' // the paginator's header and footer rows: running heads, page numbers
+const DESK_SIDE = 64, DESK_TOP = 6, DESK_BOTTOM = 14 // desk around the paper; the side leaves room for the arrows
+let bookLayoutOn = false
+function syncBookLayout() {
+  const stage = $('#stage')
+  let on = !!S.bookLayout && !!view && !view.isFixedLayout && S.flow === 'paginated' && +S.columns === 2 && api.platform !== 'android'
+  let w = 0, h = 0
+  if (on) {
+    const g = +S.gap / 100, col = +S.maxWidth
+    h = stage.clientHeight - DESK_TOP - DESK_BOTTOM
+    // The paginator's text block is min(width × (1 − gap), two columns): wider paper only adds margin.
+    // It shows two columns when the block is wider than one column and its box is landscape.
+    w = Math.floor(Math.min(stage.clientWidth - 2 * DESK_SIDE, 2 * col / (1 - g) + 2))
+    on = h >= 320 && w > h && w * (1 - g) > col + 2
+  }
+  if (on) {
+    stage.style.setProperty('--paper-x', Math.round((stage.clientWidth - w) / 2) + 'px')
+    stage.style.setProperty('--paper-y', DESK_TOP + 'px')
+    stage.style.setProperty('--paper-w', w + 'px')
+    stage.style.setProperty('--paper-h', h + 'px')
+  }
+  if (on === bookLayoutOn) return
+  bookLayoutOn = on
+  $('#reader').classList.toggle('book-layout', on) // not 'book': the bookshelf styles .book
+  view?.renderer?.setAttribute('margin', on ? BOOK_MARGIN : '28px')
+  updateRunningHeads()
+}
+// book title over the left page and the chapter over the right one; the paginator hides its
+// header on a chapter's opening spread, like a printed book
+function updateRunningHeads() {
+  const heads = view?.renderer?.heads ?? []
+  const on = bookLayoutOn && heads.length > 1
+  const chapter = lastLoc?.tocItem?.label?.trim() || current?.author || ''
+  heads.forEach((h, i) => { h.textContent = !on ? '' : i === 0 ? current?.title ?? '' : i === 1 ? chapter : '' })
+}
+// the stacks of page edges beside the paper: the left one grows as you read, the right one shrinks
+function syncPageEdges(fraction) {
+  const f = Math.min(1, Math.max(0, fraction || 0))
+  const stage = $('#stage')
+  stage.style.setProperty('--edge-l', (2 + 8 * f).toFixed(1) + 'px')
+  stage.style.setProperty('--edge-r', (2 + 8 * (1 - f)).toFixed(1) + 'px')
+}
 
 // ----- image viewer: click a picture in a book (a map, diagram, illustration) to see it
 // full screen. Wheel, +/− or double-click zoom; drag to pan; Esc or a click outside closes.
@@ -2640,7 +2696,9 @@ $('#btn-footer').onclick = () => setSetting('footerAuto', !S.footerAuto)
 
 // ----- page turn animation
 // The current page is captured as an image and laid over the reader; the book moves
-// to the new page underneath, then the image is animated away (3D flip or slide).
+// to the new page underneath, then the image is animated away: a 3D flip (flip, soft-flip),
+// a slide, or, for drift and fade, the image leaves while the live page comes in.
+// Unknown values (from a newer version) use the flip.
 let pageAnim = null      // running animation: { finish() }
 let pageCapturing = false
 // Chromium stops animation frames while the window is hidden or covered by other
@@ -2680,10 +2738,18 @@ async function turnPage(side) {
   if (effect === 'none' || !CAN.pageCapture || S.flow !== 'paginated' || matchMedia('(prefers-reduced-motion: reduce)').matches)
     return navSide(side)
   if (pageCapturing) return
-  pageAnim?.finish()
   pageCapturing = true
+  // A turn still running is finished and painted first: the capture is the last painted frame,
+  // and a half-faded page would otherwise be baked into the next turn's image.
+  if (pageAnim) {
+    pageAnim.finish()
+    await nextFrame()
+    if (!view) { pageCapturing = false; return }
+  }
   const stage = $('#stage')
-  const r = stage.getBoundingClientRect()
+  const s = stage.getBoundingClientRect()
+  // the area that turns: the paper in the book layout, otherwise the whole stage (#view-host fills it)
+  const r = $('#view-host').getBoundingClientRect()
   let url, overlay
   try {
     hideSelPop()
@@ -2693,7 +2759,7 @@ async function turnPage(side) {
     img.src = url
     await img.decode()
     if (!view) throw new Error('closed')
-    overlay = buildPageOverlay(url, r, side, effect)
+    overlay = buildPageOverlay(url, r, side, effect, { x: r.left - s.left, y: r.top - s.top })
     stage.append(overlay.el)
     await nextFrame()
   } catch {
@@ -2708,10 +2774,25 @@ async function turnPage(side) {
   pageAnim = overlay.play(cleanup)
 }
 
-function buildPageOverlay(url, r, side, effect) {
-  const W = r.width, H = r.height
+// CSS cubic-bezier() as a function of time, for motion that is sampled in JS
+function cubicBezier(x1, y1, x2, y2) {
+  const at = (a, b, t) => 3 * a * t * (1 - t) ** 2 + 3 * b * t * t * (1 - t) + t ** 3
+  return x => {
+    if (x <= 0) return 0
+    if (x >= 1) return 1
+    let lo = 0, hi = 1, t = x
+    for (let i = 0; i < 32; i++) { t = (lo + hi) / 2; if (at(x1, x2, t) < x) lo = t; else hi = t }
+    return at(y1, y2, t)
+  }
+}
+
+// r: the captured area; at: where it sits in the stage (the overlay covers the whole stage,
+// so a turning leaf can rise past the paper's edges)
+function buildPageOverlay(url, r, side, effect, at = { x: 0, y: 0 }) {
+  const W = r.width, H = r.height, X = at.x, Y = at.y
   const theme = THEMES[S.theme] ?? THEMES.dark
   const root = el('div', { class: 'pt-overlay' })
+  const place = (node, x, w) => Object.assign(node.style, { left: X + x + 'px', top: Y + 'px', width: w + 'px', height: H + 'px' })
   const bg = (node, offsetX) => {
     node.style.backgroundImage = `url("${url}")`
     node.style.backgroundSize = `${W}px ${H}px`
@@ -2725,9 +2806,38 @@ function buildPageOverlay(url, r, side, effect) {
     return { anims, finish: () => { anims.forEach(a => { try { a.finish() } catch {} }); end() } }
   }
 
+  // drift and fade: the old page leaves as an image clipped to the paper while the live view
+  // comes in underneath. Only the text moves; the paper and the book's frame stay put.
+  if (effect === 'drift' || effect === 'fade') {
+    const clip = el('div', { class: 'pt-clip' })
+    place(clip, 0, W)
+    const sheet = el('div', { class: 'pt-sheet' })
+    bg(sheet, 0)
+    clip.append(sheet)
+    root.append(clip)
+    const dx = side === 'right' ? -40 : 40 // toward the direction of travel
+    return {
+      el: root,
+      play: cleanup => {
+        // no fill after the end: the view's own transform and opacity come back untouched
+        const anims = effect === 'drift' ? [
+          sheet.animate([{ transform: 'none', opacity: 1 }, { transform: `translateX(${dx}px)`, opacity: 0 }],
+            { duration: 200, easing: 'cubic-bezier(.4, 0, 1, 1)', fill: 'forwards' }),
+          view.animate([{ transform: `translateX(${-dx}px)`, opacity: 0 }, { transform: 'none', opacity: 1 }],
+            { duration: 320, delay: 40, easing: 'cubic-bezier(.2, .7, .2, 1)', fill: 'backwards' }),
+        ] : [
+          sheet.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: 'linear', fill: 'forwards' }),
+          view.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, delay: 60, easing: 'ease-out', fill: 'backwards' }),
+        ]
+        return runAll(anims, cleanup)
+      },
+    }
+  }
+
   if (effect === 'slide') {
     const sheet = el('div')
-    Object.assign(sheet.style, { left: 0, width: W + 'px', boxShadow: '0 0 28px rgba(0,0,0,.35)' })
+    place(sheet, 0, W)
+    sheet.style.boxShadow = '0 0 28px rgba(0,0,0,.35)'
     bg(sheet, 0)
     root.append(sheet)
     return {
@@ -2739,54 +2849,61 @@ function buildPageOverlay(url, r, side, effect) {
   }
 
   // flip: in a two-page spread the turning leaf is one half, hinged at the spine;
-  // with a single page, the whole page turns on its outer edge
+  // with a single page, the whole page turns on its outer edge.
+  // soft-flip is the same turn, quicker and lighter: a flatter perspective, a curve that
+  // starts fast and lands softly, and about half the shading, in the theme's shade colour.
+  const soft = effect === 'soft-flip'
+  const shade = getComputedStyle(document.body).getPropertyValue('--turn-shade').trim() || '40 30 10'
+  const tone = a => `rgb(${shade} / ${a})`
   const spread = isSpread()
   const spineX = spread ? W / 2 : side === 'right' ? 0 : W
   const leafX = side === 'right' ? spineX : 0
   const leafW = side === 'right' ? W - spineX : spineX
-  root.style.perspective = `${Math.max(1600, W * 1.6)}px`
-  root.style.perspectiveOrigin = `${spineX}px 50%`
+  root.style.perspective = `${soft ? W * 3.5 : Math.max(1600, W * 1.6)}px`
+  root.style.perspectiveOrigin = `${X + spineX}px ${Y + H / 2}px`
 
   // the half of the old spread that does not move until the leaf lands on it
   let still = null
   if (spread) {
     still = el('div')
     const stillX = side === 'right' ? 0 : spineX
-    Object.assign(still.style, { left: stillX + 'px', width: (W - leafW) + 'px' })
+    place(still, stillX, W - leafW)
     bg(still, stillX)
     root.append(still)
   }
   // shadow the leaf throws onto the page being revealed
   const cast = el('div', { class: 'pt-cast' })
-  Object.assign(cast.style, {
-    left: leafX + 'px', width: leafW + 'px',
-    background: `linear-gradient(${side === 'right' ? 90 : 270}deg, rgba(0,0,0,.45), rgba(0,0,0,.08) 35%, transparent 70%)`,
-  })
+  place(cast, leafX, leafW)
+  cast.style.background = soft
+    ? `linear-gradient(${side === 'right' ? 90 : 270}deg, ${tone(.18)}, ${tone(0)} 55%)`
+    : `linear-gradient(${side === 'right' ? 90 : 270}deg, rgba(0,0,0,.45), rgba(0,0,0,.08) 35%, transparent 70%)`
   const leaf = el('div', { class: 'pt-leaf' })
-  Object.assign(leaf.style, {
-    left: leafX + 'px', width: leafW + 'px',
-    transformOrigin: side === 'right' ? 'left center' : 'right center',
-  })
+  place(leaf, leafX, leafW)
+  leaf.style.transformOrigin = side === 'right' ? 'left center' : 'right center'
   const front = el('div', { class: 'pt-face' })
   bg(front, leafX)
   front.style.backgroundColor = theme.bg
   const frontShade = el('div', { class: 'pt-shade' })
-  frontShade.style.background = `linear-gradient(${side === 'right' ? 90 : 270}deg, rgba(0,0,0,.05), rgba(0,0,0,.35) 60%, rgba(255,255,255,.12))`
+  frontShade.style.background = soft
+    ? `linear-gradient(${side === 'right' ? 90 : 270}deg, ${tone(.03)}, ${tone(.2)})` // hinge → free edge
+    : `linear-gradient(${side === 'right' ? 90 : 270}deg, rgba(0,0,0,.05), rgba(0,0,0,.35) 60%, rgba(255,255,255,.12))`
   front.append(frontShade)
   // The back of the leaf is see-through: the book has already moved to the new
   // spread underneath, so the real new page shows "printed" on the leaf's back.
   const back = el('div', { class: 'pt-face pt-back' })
   const backShade = el('div', { class: 'pt-shade' })
-  backShade.style.background = `linear-gradient(${side === 'right' ? 270 : 90}deg, rgba(0,0,0,.45), rgba(0,0,0,.12) 22%, rgba(255,255,255,.06) 60%, rgba(0,0,0,.18))`
+  backShade.style.background = soft
+    ? `linear-gradient(${side === 'right' ? 270 : 90}deg, ${tone(.2)}, ${tone(.02)} 60%)` // darkest at the hinge
+    : `linear-gradient(${side === 'right' ? 270 : 90}deg, rgba(0,0,0,.45), rgba(0,0,0,.12) 22%, rgba(255,255,255,.06) 60%, rgba(0,0,0,.18))`
   back.append(backShade)
   leaf.append(front, back)
   root.append(cast, leaf)
 
   // Sample the motion so the uncovering of the old half can follow the exact
   // perspective-projected edge of the leaf.
-  const D = spread ? 640 : 560
+  const D = soft ? 520 : spread ? 640 : 560
   const P = parseFloat(root.style.perspective)
-  const ease = t => t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2
+  const ease = soft ? cubicBezier(.3, .5, .2, 1) : t => t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2
   const N = 36
   const leafFrames = [], stillFrames = [], frontFrames = [], backFrames = []
   for (let i = 0; i <= N; i++) {
@@ -2802,6 +2919,11 @@ function buildPageOverlay(url, r, side, effect) {
       const covered = side === 'right' ? Math.max(0, -x) : Math.max(0, x)
       stillFrames.push({ offset: t, clipPath: side === 'right' ? `inset(0 ${covered}px 0 0)` : `inset(0 0 0 ${covered}px)` })
     }
+    if (soft) { // the front's shade comes in over the first half of the time, the back's leaves over the second
+      frontFrames.push({ offset: t, opacity: Math.min(1, t / 0.5) })
+      backFrames.push({ offset: t, opacity: t < 0.5 ? 1 : (1 - t) / 0.5 })
+      continue
+    }
     const lift = Math.sin(Math.PI * e) // 0 → 1 (upright) → 0
     frontFrames.push({ offset: t, opacity: e < 0.5 ? lift : 1 })
     backFrames.push({ offset: t, opacity: e < 0.5 ? 1 : 0.25 + 0.75 * lift })
@@ -2814,7 +2936,8 @@ function buildPageOverlay(url, r, side, effect) {
         leaf.animate(leafFrames, opts),
         frontShade.animate(frontFrames, opts),
         backShade.animate(backFrames, opts),
-        cast.animate([{ opacity: 0 }, { opacity: 1, offset: 0.3 }, { opacity: 0, offset: 0.55 }, { opacity: 0 }], { duration: D, easing, fill: 'forwards' }),
+        soft ? cast.animate([{ opacity: 0 }, { opacity: 1, offset: 0.18 }, { opacity: 0 }], opts)
+          : cast.animate([{ opacity: 0 }, { opacity: 1, offset: 0.3 }, { opacity: 0, offset: 0.55 }, { opacity: 0 }], { duration: D, easing, fill: 'forwards' }),
       ]
       if (still) anims.push(still.animate(stillFrames, opts))
       // the last bit of shading fades so the hand-off to the live page is seamless
@@ -3797,6 +3920,7 @@ function applyCapabilities() {
   if (!CAN.showInFolder) $$('#card-menu [data-cm="folder"]').forEach(e => { e.hidden = true })
   if (!CAN.autoBackup) $('#bk-auto').closest('.bk-sec').hidden = true
   if (!CAN.pageCapture) $('#set-pageTurn').closest('.set-row').hidden = true
+  if (api.platform === 'android') $('#set-bookLayout').closest('.set-row').hidden = true // desktop only (syncBookLayout)
   if (!CAN.dragDrop) $('#lib-empty p').textContent = 'Add EPUB, MOBI, AZW3, PDF, FB2 or CBZ books from this device, or'
   if (api.platform === 'android') {
     $('#edit-dialog .ed-hint').textContent = 'To change the cover, choose an image, or find one online.'

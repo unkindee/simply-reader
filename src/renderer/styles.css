@@ -637,12 +637,16 @@ foliate-view::part(foot) {
 
 /* ---------- page turn ---------- */
 .pt-overlay { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; }
-.pt-overlay > div { position: absolute; top: 0; bottom: 0; background-repeat: no-repeat; }
+.pt-overlay > div { position: absolute; background-repeat: no-repeat; } /* placed over the turning area by buildPageOverlay */
 .pt-leaf { transform-style: preserve-3d; will-change: transform; }
 .pt-face { position: absolute; inset: 0; backface-visibility: hidden; background-repeat: no-repeat; }
 .pt-back { transform: rotateY(180deg); }
 .pt-shade { position: absolute; inset: 0; opacity: 0; }
 .pt-cast { opacity: 0; }
+/* drift and fade: the old page's image, clipped to the paper so only the text seems to move */
+.pt-clip { overflow: hidden; }
+.pt-sheet { position: absolute; inset: 0; background-repeat: no-repeat; will-change: transform, opacity; }
+#reader.book-layout .pt-clip { border-radius: 4px; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pop { from { opacity: 0; transform: scale(.96); } }
@@ -1092,3 +1096,63 @@ body[data-view="reader"] .bulk-bar { display: none; }
 .android #stats-dialog { max-height: calc(100dvh - 24px); overflow: auto; }
 /* the online search in Edit details keeps its label */
 .android .ed-find span { display: inline; }
+
+/* ---------- book layout: a two-page spread as an open book on a desk (see syncBookLayout) ---------- */
+/* --desk: around the book; the paper is --bg, the colour the book's pages are drawn on.
+   --paper-edge / --paper-edge-gap: the lines of the page-edge stacks; --spine: the gutter's
+   darkest point; --turn-shade: the soft flip's shading colour (r g b) */
+body[data-theme="light"] {
+  --desk: #e6e3dc; --paper-edge: #cfcabd; --paper-edge-gap: #f3f0e8; --spine: rgba(60, 45, 20, .13);
+  --paper-shadow: 0 1px 2px rgba(60, 45, 20, .12), 0 28px 50px -30px rgba(60, 45, 20, .5);
+  --turn-shade: 40 30 10;
+}
+body[data-theme="sepia"] {
+  --desk: #ded2b5; --paper-edge: #cbbb98; --paper-edge-gap: #efe6cf; --spine: rgba(80, 55, 20, .14);
+  --paper-shadow: 0 1px 2px rgba(80, 55, 20, .14), 0 28px 50px -30px rgba(80, 55, 20, .55);
+  --turn-shade: 50 35 12;
+}
+body[data-theme="dark"] {
+  --desk: #0e0e10; --paper-edge: #3a3a41; --paper-edge-gap: #212125; --spine: rgba(0, 0, 0, .4);
+  --paper-shadow: 0 0 0 1px #29292e, 0 30px 60px -30px rgba(0, 0, 0, .9);
+  --turn-shade: 0 0 0;
+}
+/* OLED: the page stays pure black; only a faint hairline frame, faint edges and a faint
+   light fold mark the book (a shadow can't darken black) */
+body[data-theme="black"] {
+  --desk: #000; --paper-edge: #26262a; --paper-edge-gap: #000; --spine: rgba(255, 255, 255, .045);
+  --paper-shadow: 0 0 0 1px #1e1e21;
+  --turn-shade: 0 0 0;
+}
+/* the switch only matters for two-page spreads, never in scroll flow */
+#reader.scrolled #settings .book-only { display: none; }
+#reader.book-layout { background: var(--desk); transition: background-color .25s; }
+#reader.book-layout .bar { background: var(--desk); }
+/* the running heads carry the title and chapter; the toolbar keeps its layout without them */
+#reader.book-layout .titles { visibility: hidden; }
+#reader.book-layout #view-host {
+  inset: auto; left: var(--paper-x); top: var(--paper-y); width: var(--paper-w); height: var(--paper-h);
+  background: var(--bg); border-radius: 4px; overflow: hidden; box-shadow: var(--paper-shadow);
+}
+#book-frame { display: none; }
+#reader.book-layout #book-frame {
+  display: block; position: absolute; z-index: 1; pointer-events: none;
+  left: var(--paper-x); top: var(--paper-y); width: var(--paper-w); height: var(--paper-h);
+}
+#book-frame .bf-spine {
+  position: absolute; top: 0; bottom: 0; left: calc(50% - 48px); width: 96px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--spine) 54%, transparent) 46%,
+    var(--spine) 50%, color-mix(in srgb, var(--spine) 54%, transparent) 54%, transparent);
+}
+#book-frame .bf-edge { position: absolute; top: 4px; bottom: 4px; }
+#book-frame .bf-left {
+  right: 100%; width: var(--edge-l, 5px); border-radius: 2px 0 0 2px;
+  background: repeating-linear-gradient(90deg, var(--paper-edge) 0 1px, var(--paper-edge-gap) 1px 2.5px);
+}
+#book-frame .bf-right {
+  left: 100%; width: var(--edge-r, 5px); border-radius: 0 2px 2px 0;
+  background: repeating-linear-gradient(270deg, var(--paper-edge) 0 1px, var(--paper-edge-gap) 1px 2.5px);
+}
+/* running heads: small italic serif over each page (only filled in the book layout) */
+foliate-view::part(head) {
+  font: italic 12.5px/1.2 var(--font-serif); letter-spacing: .01em; color: var(--muted); opacity: 1;
+}

@@ -110,6 +110,8 @@
   <div id="stage">
     <button class="edge-nav left" id="nav-prev" title="Previous page"><svg class="ic"><use href="#i-left"/></svg></button>
     <div id="view-host"></div>
+    <!-- open-book look around a two-page spread: page edges and the spine (see syncBookLayout) -->
+    <div id="book-frame" aria-hidden="true"><i class="bf-edge bf-left"></i><i class="bf-spine"></i><i class="bf-edge bf-right"></i></div>
     <button class="edge-nav right" id="nav-next" title="Next page"><svg class="ic"><use href="#i-right"/></svg></button>
     <button id="history-back" hidden>↩ Back to where you were</button>
   </div>
@@ -205,13 +207,16 @@
       </div>
     </div>
     <label class="set-row check pdf-only"><input type="checkbox" id="set-pdfDark"><span>Dark pages (invert colors)</span></label>
-    <div class="set-row"><span>Page turn</span>
-      <div class="seg" id="set-pageTurn">
-        <button data-val="flip">Flip</button>
-        <button data-val="slide">Slide</button>
-        <button data-val="none">None</button>
-      </div>
-    </div>
+    <label class="set-row"><span>Page turn</span>
+      <select id="set-pageTurn">
+        <option value="soft-flip">Soft flip</option>
+        <option value="drift">Drift</option>
+        <option value="fade">Fade</option>
+        <option value="flip">Flip</option>
+        <option value="slide">Slide</option>
+        <option value="none">None</option>
+      </select>
+    </label>
     <div class="set-row text-only"><span>Columns</span>
       <div class="seg" id="set-columns">
         <button data-val="1">One</button>
@@ -219,6 +224,7 @@
       </div>
     </div>
     <label class="set-row check text-only"><input type="checkbox" id="set-pageNumbers"><span>Page numbers</span></label>
+    <label class="set-row check text-only book-only" title="Two pages side by side are shown as an open book on a desk"><input type="checkbox" id="set-bookLayout"><span>Book layout</span></label>
     <label class="set-row check text-only"><input type="checkbox" id="set-justify"><span>Justify text</span></label>
     <label class="set-row check text-only"><input type="checkbox" id="set-hyphenate"><span>Hyphenation</span></label>
     <label class="set-row check text-only"><input type="checkbox" id="set-override"><span>Override book colors</span></label>
