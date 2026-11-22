@@ -2296,6 +2296,10 @@ const typingOnAndroid = () => api.platform === 'android' &&
   !!document.activeElement?.matches('textarea, input:not([type=checkbox], [type=range])')
 if (api.platform === 'android') document.addEventListener('focusout', () => { if (view) schedulePagination(700) })
 
+// Android: counting waits this long after a page turn or a touch, so the next chapter's layout
+// (a few hundred ms on a slow tablet) runs while the page is being read, not as the reader taps
+const COUNT_PAUSE = api.platform === 'android' ? 1500 : 0
+
 // remembered most recent last, so the layout before this one is saved with it (see savedPagination)
 function cachePages(key, pages) {
   pagerCache.delete(key)
@@ -2335,8 +2339,9 @@ async function runPagination() {
     host.append(p)
     p.open(book)
     for (const [i, section] of sections.entries()) {
-      // never compete with a page turn for the main thread
-      while ((pageAnim || pageCapturing) && job === pagerJob) await wait(60)
+      // never compete with a page turn for the main thread (on Android, nor with the moments
+      // after one: a chapter's layout can block a slow tablet for 300 ms, see COUNT_PAUSE)
+      while ((pageAnim || pageCapturing || Date.now() - lastReadActivity < COUNT_PAUSE) && job === pagerJob) await wait(60)
       if (job !== pagerJob) return
       if (section.linear === 'no' || !book.sections[i]?.load) continue
       await p.goTo({ index: i })
@@ -2673,11 +2678,16 @@ function onDocLoad({ detail: { doc, index } }) {
   doc.addEventListener('click', e => handleDocClick(e, doc))
   doc.addEventListener('pointerup', () => checkSelection(doc, index))
   doc.addEventListener('keyup', e => { if (e.shiftKey) checkSelection(doc, index) })
-  doc.addEventListener('pointerdown', () => {
+  doc.addEventListener('pointerdown', e => {
     if (noteEdit) closeNoteEditor(true)
     const sel = doc.getSelection()
     suppressClick = anyOverlayOpen() || !!(sel && !sel.isCollapsed)
     hideSelPop(); closeFootnote(); hideLookup(); hideGoto()
+    // a tap near the sides turns the page (handleDocClick): its picture can be taken already
+    if (!suppressClick && e.button === 0 && S.flow === 'paginated') {
+      const r = view.getBoundingClientRect(), rel = (frameOffset(doc).x + e.clientX - r.left) / r.width
+      if (rel < 0.22 || rel > 0.78) captureEarly()
+    }
   })
   doc.addEventListener('mousemove', e => {
     if (!$('#reader').classList.contains('immersive')) return
@@ -2783,6 +2793,21 @@ function navigateAndSettle(side) {
   })
 }
 
+// Android: a tap turns the page when the finger lifts, so the picture for the animation is taken
+// as it touches down (the capture needs ~150 ms on a slow tablet; a tap lasts ~100). turnPage
+// uses it only for that tap's turn: within a second, on the same page, with the same layout.
+let earlyCapture = null // { at, cfi, rect, promise }
+const rectKey = r => [r.left, r.top, r.width, r.height].map(Math.round).join()
+function captureEarly() {
+  if (api.platform !== 'android' || !view || pageAnim || pageCapturing) return
+  const effect = pageTurnEffect()
+  if (effect === 'none' || !CAN.pageCapture || S.flow !== 'paginated' || matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  const r = $('#view-host').getBoundingClientRect()
+  const promise = api.capture({ x: r.left, y: r.top, width: r.width, height: r.height })
+  promise.catch(() => {}) // a tap that doesn't turn the page never reads it
+  earlyCapture = { at: performance.now(), cfi: lastLoc?.cfi, rect: rectKey(r), promise }
+}
+
 async function turnPage(side) {
   if (!view) return
   const effect = S.pageTurn
@@ -2804,7 +2829,10 @@ async function turnPage(side) {
   let url, overlay
   try {
     hideSelPop()
-    const buf = await api.capture({ x: r.left, y: r.top, width: r.width, height: r.height })
+    const early = earlyCapture
+    earlyCapture = null
+    const fresh = early && performance.now() - early.at < 1000 && early.cfi === lastLoc?.cfi && early.rect === rectKey(r)
+    const buf = await (fresh ? early.promise : api.capture({ x: r.left, y: r.top, width: r.width, height: r.height }))
     url = URL.createObjectURL(new Blob([buf], { type: 'image/jpeg' }))
     const img = new Image()
     img.src = url
@@ -3518,6 +3546,7 @@ $('#btn-settings').onclick = e => { e.stopPropagation(); const s = $('#settings'
 $('#btn-full').onclick = () => toggleFullscreen()
 $('#nav-prev').onclick = () => turnPage('left')
 $('#nav-next').onclick = () => turnPage('right')
+for (const b of ['#nav-prev', '#nav-next']) $(b).addEventListener('pointerdown', () => captureEarly())
 $('#stage').addEventListener('wheel', handleWheel, { passive: false })
 
 async function toggleFullscreen(force) {
