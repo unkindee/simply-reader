@@ -530,7 +530,8 @@ async function refreshLibrary() {
 }
 
 function coverEl(b) {
-  if (b.cover) return el('div', { class: 'cover' }, el('img', { src: b.cover, alt: '', draggable: 'false' }))
+  // covers are up to 800 px wide: decode them off the main thread, and only once they're near the screen
+  if (b.cover) return el('div', { class: 'cover' }, el('img', { src: b.cover, alt: '', draggable: 'false', loading: 'lazy', decoding: 'async' }))
   // generated cover: deterministic color from title
   let h = 0
   for (const c of b.title ?? '') h = (h * 31 + c.charCodeAt(0)) >>> 0
@@ -1584,7 +1585,15 @@ let readPending = { ms: 0, pages: 0, day: null, bookId: null }
 let readFraction = null
 let readPage = null // page number shown when the last page turn happened
 const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-const markReading = () => { lastReadActivity = Date.now() }
+const markReading = () => { lastReadActivity = Date.now(); syncKeepAwake() }
+// Android: the screen stays on while a book is being read, so it doesn't dim in the middle of a
+// page; after IDLE_LIMIT without a page turn or a touch it may sleep again (checked every tick)
+let keptAwake = false
+function syncKeepAwake() {
+  if (!api.keepAwake) return
+  const on = !!current && !document.hidden && document.body.dataset.view === 'reader' && Date.now() - lastReadActivity <= IDLE_LIMIT
+  if (on !== keptAwake) { keptAwake = on; api.keepAwake(on) }
+}
 for (const t of ['keydown', 'wheel', 'pointerdown']) document.addEventListener(t, () => { if (current) markReading() }, { capture: true, passive: true })
 
 function noteReading(fraction) {
@@ -1635,6 +1644,7 @@ function flushReading() {
   })
 }
 setInterval(() => {
+  syncKeepAwake()
   if (!current || document.hidden || document.body.dataset.view !== 'reader') return
   if (Date.now() - lastReadActivity > IDLE_LIMIT) return
   addReading(READ_TICK, 0)
@@ -2042,6 +2052,7 @@ let bookmarks = []
 
 function showView(name) {
   document.body.dataset.view = name
+  syncKeepAwake()
   if (name === 'library') document.title = 'Simply Reader'
 }
 

@@ -18,6 +18,7 @@ import android.util.Base64;
 import android.view.PixelCopy;
 import android.view.View;
 import android.view.Window;
+import android.view.WindowManager;
 import android.webkit.WebView;
 import androidx.activity.result.ActivityResult;
 import androidx.core.view.WindowCompat;
@@ -578,6 +579,17 @@ public class SimplyReaderPlugin extends Plugin {
                 c.setAppearanceLightStatusBars(!dark);
                 c.setAppearanceLightNavigationBars(!dark);
             } catch (Exception ignored) {}
+            call.resolve();
+        });
+    }
+
+    /** The screen stays on while a book is being read (the window decides when). */
+    @PluginMethod
+    public void setKeepAwake(PluginCall call) {
+        boolean on = Boolean.TRUE.equals(call.getBoolean("on", false));
+        getActivity().runOnUiThread(() -> {
+            if (on) getActivity().getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            else getActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             call.resolve();
         });
     }

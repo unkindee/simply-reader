@@ -560,6 +560,7 @@ window.api = {
   onPause: cb => App.addListener('pause', () => cb()),
   exitApp: () => App.exitApp(),
   setChrome: ({ bg, dark }) => SR.setChrome({ bg, dark }).catch(() => {}),
+  keepAwake: on => SR.setKeepAwake({ on: !!on }).catch(() => {}),
 }
 
 // test hooks for the debug build (driven over the DevTools protocol; harmless otherwise)
