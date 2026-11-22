@@ -174,7 +174,11 @@ Each section of a reflowable book is its own same-origin iframe document. `onDoc
 
 The current view is captured through `api.capture(rect)`, overlaid as an image, the book moves underneath (`navigateAndSettle`), and the overlay animates away (flip or slide). Pagination waits while `pageAnim` or `pageCapturing` is set.
 
-Without a capture (Android, `CAN.pageCapture` false) the Page turn menu offers only Slide and None (`pageTurnEffect()`), and Slide sets foliate's own `animated` attribute on the renderer: turns and swipe snaps scroll smoothly instead of jumping.
+On Android the capture is native (`PixelCopy`, at CSS-pixel resolution, returned as base64), so every effect works there too. A swipe drags the page itself, so Android also sets foliate's `animated` attribute (`SWIPE_SLIDE`) and the swipe settles smoothly; `turnPage` removes it while the overlay turns. A platform without a capture would get only Slide (that attribute) and None (`pageTurnEffect()`).
+
+### Book layout
+
+`syncBookLayout()` draws the paper on a desk when `bookLayout` is on, the flow is paginated and the book is reflowable: a two-page spread when two columns fit (landscape), and on Android otherwise a single page (`book-single`: bound on the left, unread pages stacked on the right, the chapter as the running head). Desktop keeps the full-stage layout when a spread doesn't fit.
 
 ### Reading time, speed and goals
 
@@ -234,7 +238,7 @@ Windows is the main platform and its behaviour must not change: every Linux diff
 
 The Android app (`mobile/`, details in `mobile/README.md`) bundles `src/renderer`, `src/shared` and `vendor/foliate-js` unchanged into a Capacitor WebView; `mobile/web/api.js` replaces preload + main as `window.api`, on a native Java plugin. It builds on GitHub Actions (`.github/workflows/android.yml`, pushes to the `android` branch).
 
-- **Shared code:** `app.js` and `styles.css` serve both. Android differences sit behind `api.platform === 'android'`, `api.capabilities` (read into `CAN` in app.js: `folderImport`, `showInFolder`, `dragDrop`, `pageCapture`, `autoBackup`; desktop has all) and the `html.android` class for CSS. Android-only API extras are optional calls: `api.onBackButton`, `api.onPause`, `api.exitApp`, `api.setChrome`.
+- **Shared code:** `app.js` and `styles.css` serve both. Android differences sit behind `api.platform === 'android'`, `api.capabilities` (read into `CAN` in app.js: `folderImport`, `showInFolder`, `dragDrop`, `pageCapture`, `autoBackup`; desktop has all, Android has `pageCapture`) and the `html.android` class for CSS. Android-only API extras are optional calls: `api.onBackButton`, `api.onPause`, `api.exitApp`, `api.setChrome`.
 - **Rules live once:** change library rules in `src/shared/rules.mjs`, not in main.js or the adapter. A new library field goes in `LIBRARY_FIELDS` there.
 - **Saves stay pending until written:** `flushPosition`, `flushBookPrefs`, `flushSettings`, `flushNotes` and `flushReading` keep what failed and retry on the next save; `flushAll()` runs when the window is hidden (and on Android's pause).
 - **Restore drops `pagination`** on both platforms: page counts depend on the fonts and window of the system that made them.
