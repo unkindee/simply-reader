@@ -210,6 +210,13 @@ async function statsAdd(add) {
 }
 
 // ---------------------------------------------------------------- network (native, fixed hosts)
+// base64 from the plugin to bytes; a plain loop (Uint8Array.from(atob(…), fn) took 85 ms for a page capture)
+function fromBase64(b64) {
+  if (Uint8Array.fromBase64) return Uint8Array.fromBase64(b64)
+  const s = atob(b64), out = new Uint8Array(s.length)
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i)
+  return out
+}
 async function fetchJSON(url) {
   const r = await SR.httpGet({ url, kind: 'json' })
   if (r.status === 404) return null
@@ -222,7 +229,7 @@ async function fetchCoverImage(url) {
   if (r.status < 200 || r.status >= 300 || !r.base64) return null
   const type = r.type ?? ''
   if (!type.startsWith('image/')) return null
-  const data = Uint8Array.from(atob(r.base64), c => c.charCodeAt(0))
+  const data = fromBase64(r.base64)
   if (data.length < 200 || data.length > 20 * 1024 * 1024) return null
   return { type, data }
 }
@@ -497,7 +504,7 @@ async function setFullscreen(on) {
 async function capture(rect) {
   const d = devicePixelRatio || 1
   const { data } = await SR.capture({ x: rect.x * d, y: rect.y * d, width: rect.width * d, height: rect.height * d, scale: 1 / d })
-  return Uint8Array.from(atob(data), c => c.charCodeAt(0))
+  return fromBase64(data)
 }
 
 const unavailable = what => () => Promise.reject(new Error(`${what} isn’t available on Android`))
