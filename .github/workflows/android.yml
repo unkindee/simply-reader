@@ -77,7 +77,10 @@ jobs:
         working-directory: mobile/android
         run: ./gradlew --no-daemon assembleDebug
 
-      - name: Build the release APK (only with signing secrets)
+      # The release APK is the one to install: compiled ahead of time, without the debug build's
+      # checks, so it starts and runs faster. With the signing secrets it gets the release key;
+      # without them the debug key above, so it installs over debug builds and keeps the library.
+      - name: Build the release APK
         working-directory: mobile/android
         env:
           KEYSTORE_B64: ${{ secrets.SR_KEYSTORE_BASE64 }}
@@ -85,18 +88,23 @@ jobs:
           SR_KEY_ALIAS: ${{ secrets.SR_KEY_ALIAS }}
           SR_KEY_PASSWORD: ${{ secrets.SR_KEY_PASSWORD }}
         run: |
-          if [ -z "$KEYSTORE_B64" ]; then echo "No signing secrets: release APK skipped"; exit 0; fi
-          export SR_KEYSTORE="$RUNNER_TEMP/release.keystore"
-          echo "$KEYSTORE_B64" | base64 -d > "$SR_KEYSTORE"
+          if [ -n "$KEYSTORE_B64" ]; then
+            export SR_KEYSTORE="$RUNNER_TEMP/release.keystore"
+            echo "$KEYSTORE_B64" | base64 -d > "$SR_KEYSTORE"
+          else
+            echo "No release key: signing the release APK with the debug key"
+          fi
           ./gradlew --no-daemon assembleRelease
-          rm -f "$SR_KEYSTORE"
+          rm -f "$RUNNER_TEMP/release.keystore"
 
       - name: Check the APK
         run: |
           APK=android/app/build/outputs/apk/debug/app-debug.apk
           ls -l android/app/build/outputs/apk/*/
           # the app must not ship books or library data
-          if unzip -l "$APK" | grep -Ei '\.(epub|mobi|azw3?|fb2|cbz)$|library\.json|stats\.json'; then exit 1; fi
+          for f in android/app/build/outputs/apk/*/*.apk; do
+            if unzip -l "$f" | grep -Ei '\.(epub|mobi|azw3?|fb2|cbz)$|library\.json|stats\.json'; then exit 1; fi
+          done
           VERSION=$(node -p "require('../package.json').version")
           mkdir -p out
           cp "$APK" "out/SimplyReader-${VERSION}-debug.apk"

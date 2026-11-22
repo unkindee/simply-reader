@@ -50,6 +50,10 @@ android {
     buildTypes {
         release {
             if (releaseKeystore) signingConfig signingConfigs.release
+            // No release key yet (GitHub without the secrets): the cached debug key, so the release
+            // APK installs over debug builds and keeps the library. Moving to a real release key
+            // later means one uninstall, like any key change.
+            else if (debugKeystore) signingConfig signingConfigs.debug
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
