@@ -40,7 +40,7 @@ npm run dist:linux # electron-builder --linux AppImage deb rpm → dist/SimplyRe
 | `src/renderer/app.js` (~3,650 lines) | All renderer logic, split into commented sections (see below) |
 | `src/renderer/styles.css` | All styles. Theme tokens are on `body[data-theme=…]`; newer features append their own block at the end |
 | `src/renderer/fonts/` | Atkinson Hyperlegible (OFL) |
-| `vendor/foliate-js/` | Third-party engine, with three small local patches (see [Vendor patches](#vendor-patches)) |
+| `vendor/foliate-js/` | Third-party engine, with four small local patches (see [Vendor patches](#vendor-patches)) |
 | `dist/` | Build output (exes, `win-unpacked/`). Git-ignored; releases are published on GitHub as `SimplyReader-Setup-<version>.exe` and `SimplyReader-Portable-<version>.exe` |
 | `docs/screenshots/` | README screenshots, taken at 1440×900 from a sandbox library of public-domain Standard Ebooks titles. Never use the user's own books or data for them |
 
@@ -239,11 +239,13 @@ Windows is the main platform and its behaviour must not change: every Linux diff
 
 The Android app (`mobile/`, details in `mobile/README.md`) bundles `src/renderer`, `src/shared` and `vendor/foliate-js` unchanged into a Capacitor WebView; `mobile/web/api.js` replaces preload + main as `window.api`, on a native Java plugin. It builds on GitHub Actions (`.github/workflows/android.yml`, pushes to the `android` branch).
 
-- **Shared code:** `app.js` and `styles.css` serve both. Android differences sit behind `api.platform === 'android'`, `api.capabilities` (read into `CAN` in app.js: `folderImport`, `showInFolder`, `dragDrop`, `pageCapture`, `autoBackup`; desktop has all, Android has `pageCapture`) and the `html.android` class for CSS. Android-only API extras are optional calls: `api.onBackButton`, `api.onPause`, `api.exitApp`, `api.setChrome`, `api.keepAwake` (screen stays on while reading, see `syncKeepAwake`).
+- **Shared code:** `app.js` and `styles.css` serve both. Android differences sit behind `api.platform === 'android'`, `api.capabilities` (read into `CAN` in app.js: `folderImport`, `showInFolder`, `dragDrop`, `pageCapture`, `autoBackup`; desktop has all, Android has `pageCapture`) and the `html.android` class for CSS. Android-only API extras are optional calls: `api.onBackButton`, `api.onPause`, `api.exitApp`, `api.setChrome`, `api.keepAwake` (screen stays on while reading, see `syncKeepAwake`), `api.ready` (the splash screen can go).
 - **Rules live once:** change library rules in `src/shared/rules.mjs`, not in main.js or the adapter. A new library field goes in `LIBRARY_FIELDS` there.
 - **Saves stay pending until written:** `flushPosition`, `flushBookPrefs`, `flushSettings`, `flushNotes` and `flushReading` keep what failed and retry on the next save; `flushAll()` runs when the window is hidden (and on Android's pause).
 - **Restore drops `pagination`** on both platforms: page counts depend on the fonts and window of the system that made them.
 - **Book references** on Android are `sr-book:<file name>`; ids are `sha1(ref)`. Desktop ids are unchanged.
+- **Start and restarts:** the splash screen stays until boot calls `api.ready()` (once, when the library or the reader looks right; at most 5 s), so the half-set-up page is never seen; `MainActivity.markReady` logs how long the start took. The open book is remembered (`rememberOpenBook`, localStorage) until it's closed and reopens at the next start, so it survives Android ending the app in the background. If the page engine dies, `onRenderProcessGone` (MainActivity) restarts the window instead of letting Android close the app; a second loss within a minute closes it.
+- **Builds:** GitHub makes a debug APK (DevTools, `run-as`) and a release APK, the one to install (no debug checks, compiled ahead of time). Without the release secrets both are signed with the cached debug key, so they install over each other and keep the library.
 - **Tests:** `cd mobile && npm test` runs the adapter against a fake plugin. Run it, and the desktop smoke test, after changing shared code.
 
 ## Vendor patches
@@ -253,6 +255,7 @@ Keep these when updating foliate-js. Each is marked `(Simply Reader patch)` wher
 1. `paginator.js` `setStylesImportant`: return early if the element is gone (a document torn down mid-render).
 2. `pdf.js` `createDocument` per page: a plain-text document from `getTextContent()`, so in-book search, word counts and language detection work for PDFs.
 3. `pdf.js` `renderPage` cover render: scale to about 800 px wide (capped at 4×) for sharp library covers.
+4. `view.js` `makeZipLoader`: a file stored without compression (fonts and pictures often are) is returned as a slice of the book file instead of being copied through zip.js. It checks the local header's signature and falls back to zip.js for anything else.
 
 ## Testing
 

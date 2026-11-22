@@ -18,7 +18,7 @@ It's sideloaded as an APK. There's no Play Store listing, account, server or syn
 
 ## Building
 
-GitHub Actions builds the APK on every push to the `android` branch (`.github/workflows/android.yml`) and attaches it to the run as the `simply-reader-android` artifact:
+GitHub Actions builds the APKs on every push to the `android` branch (`.github/workflows/android.yml`) and attaches them to the run as the `simply-reader-android` artifact: `SimplyReader-<version>.apk` (release: install this one; it starts and runs faster) and `SimplyReader-<version>-debug.apk` (for Chrome DevTools and `run-as`):
 
 ```
 gh run list --branch android
@@ -46,7 +46,7 @@ Release builds are signed with a key that's never in the repository. Create it o
 keytool -genkeypair -v -keystore simply-reader.keystore -alias simplyreader -keyalg RSA -keysize 4096 -validity 36500
 ```
 
-Locally: set `SR_KEYSTORE` (path), `SR_KEYSTORE_PASSWORD`, `SR_KEY_ALIAS` and `SR_KEY_PASSWORD`, then `./gradlew assembleRelease`. On GitHub: add the keystore as the secret `SR_KEYSTORE_BASE64` (`base64 -w0 simply-reader.keystore`) plus the three other secrets; the workflow then builds a signed release APK as well.
+Locally: set `SR_KEYSTORE` (path), `SR_KEYSTORE_PASSWORD`, `SR_KEY_ALIAS` and `SR_KEY_PASSWORD`, then `./gradlew assembleRelease`. On GitHub: add the keystore as the secret `SR_KEYSTORE_BASE64` (`base64 -w0 simply-reader.keystore`) plus the three other secrets; the workflow then signs the release APK with it. Without the secrets the release APK is signed with the debug key below, like the debug APK, so the two install over each other.
 
 Debug builds on GitHub use a debug key kept in the Actions cache, so one debug build installs over the previous one. The cache expires after 7 days without builds; after that the next debug APK needs an uninstall first.
 
