@@ -4018,6 +4018,7 @@ function applyCapabilities() {
 
 // ---------------------------------------------------------------- boot
 applyCapabilities()
+api.getVersion?.().then(v => { if (v) $('#app-version').textContent = 'v' + v }).catch(() => {})
 ;(async () => {
   try { const s = localStorage.getItem('sort'); if (s) $('#lib-sort').value = s } catch {}
   // fonts are only needed once a book opens, so they load alongside the library instead of before it

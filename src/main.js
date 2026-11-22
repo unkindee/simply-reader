@@ -880,6 +880,9 @@ ipcMain.handle('capture', async (_e, rect) => {
   return img.toJPEG(88)
 })
 
+// the app's version, shown beside the name in the library
+ipcMain.handle('app-version', () => app.getVersion())
+
 ipcMain.handle('set-fullscreen', (_e, on) => {
   const next = typeof on === 'boolean' ? on : !win.isFullScreen()
   win.setFullScreen(next)

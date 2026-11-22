@@ -550,6 +550,7 @@ window.api = {
   },
   showInFolder: unavailable('Show in folder'),
   setFullscreen,
+  getVersion: async () => (await info()).version ?? null, // versionName, from package.json at build time
   capture,
   saveText: async (name, text) => {
     const safe = String(name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 150)

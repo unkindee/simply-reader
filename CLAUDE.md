@@ -74,6 +74,7 @@ npm run dist:linux # electron-builder --linux AppImage deb rpm → dist/SimplyRe
 | `searchBookInfo`, `fetchCoverImage`, `chooseImage` | | Edit-details suggestions and custom covers (bytes come back to the renderer) |
 | `lookupDefinition`, `lookupWikipedia` | | |
 | `showInFolder`, `saveText`, `setFullscreen`, `capture(rect)` | | `capture` snapshots part of the window for the page-turn animation |
+| `getVersion()` | `app-version` | The app version (package.json), shown beside the name in the library header. Android: the installed `versionName` |
 | `onOpenFiles(cb)`, `getPendingFiles`, `pathForFile(file)` | | Drag-and-drop uses `webUtils.getPathForFile` |
 
 ## Data on disk (`app.getPath('userData')`: `%APPDATA%\Simply Reader\` on Windows, `~/.config/Simply Reader/` on Linux)

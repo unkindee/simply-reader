@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   showInFolder: p => ipcRenderer.invoke('show-in-folder', p),
   setFullscreen: on => ipcRenderer.invoke('set-fullscreen', on),
+  getVersion: () => ipcRenderer.invoke('app-version'),
   capture: rect => ipcRenderer.invoke('capture', rect),
   saveText: (name, text) => ipcRenderer.invoke('save-text', name, text),
 })

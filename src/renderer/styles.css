@@ -92,6 +92,8 @@ body[data-view="reader"] #library { display: none; }
 }
 .brand { display: flex; align-items: center; gap: 8px; font: 600 20px var(--font-serif); letter-spacing: .2px; }
 .brand .ic { color: var(--accent); width: 24px; height: 24px; }
+.brand .version { align-self: flex-end; margin-bottom: 3px; font: 500 12px var(--font-ui); letter-spacing: 0; color: var(--muted); }
+.brand .version:empty { display: none; }
 .lib-search, .search-box { position: relative; }
 .lib-search .ic, .search-box .ic { position: absolute; left: 9px; top: 8px; width: 18px; color: var(--muted); }
 .lib-search input, .search-box input { padding-left: 34px; }
