@@ -201,9 +201,15 @@ function applySettings() {
   syncSettingsUI()
   if (!view?.renderer) return
   configureRenderer(view.renderer, S.flow)
+  // without a window capture (Android) the book engine slides its own pages: the arrows, taps
+  // and keys glide to the next page, and a swipe settles smoothly where the finger lets go
+  if (!CAN.pageCapture) view.renderer.toggleAttribute('animated',
+    pageTurnEffect() !== 'none' && !matchMedia('(prefers-reduced-motion: reduce)').matches)
   schedulePagination()
 }
 const applySettingsPerFrame = perFrame(applySettings)
+// the page turn this platform can show: everything with a window capture, otherwise slide or none
+const pageTurnEffect = () => CAN.pageCapture || S.pageTurn === 'none' ? S.pageTurn : 'slide'
 // Android: the status and navigation bars take the theme's background colour
 let chromeKey = ''
 function syncChrome() {
@@ -285,7 +291,7 @@ function syncSettingsUI() {
   for (const [k, [sel, parse]] of Object.entries(SEGMENTS))
     $$(sel + ' button').forEach(b => b.classList.toggle('active', parse(b.dataset.val) === parse(S[k])))
   for (const k of CHECKBOXES) $('#set-' + k).checked = !!S[k]
-  $('#set-pageTurn').value = S.pageTurn
+  $('#set-pageTurn').value = pageTurnEffect()
   $('#out-zoom').value = typeof S.pdfZoom === 'number' ? `${Math.round(S.pdfZoom * 100)}%` : 'Fit'
   syncScopeUI()
 }
@@ -3940,7 +3946,8 @@ function applyCapabilities() {
   if (!CAN.folderImport) $$('#lib-import, [data-action="import"]').forEach(e => { e.hidden = true })
   if (!CAN.showInFolder) $$('#card-menu [data-cm="folder"]').forEach(e => { e.hidden = true })
   if (!CAN.autoBackup) $('#bk-auto').closest('.bk-sec').hidden = true
-  if (!CAN.pageCapture) $('#set-pageTurn').closest('.set-row').hidden = true
+  // the other effects turn a captured image of the page (see turnPage)
+  if (!CAN.pageCapture) $$('#set-pageTurn option').forEach(o => { if (!['slide', 'none'].includes(o.value)) o.remove() })
   if (api.platform === 'android') $('#set-bookLayout').closest('.set-row').hidden = true // desktop only (syncBookLayout)
   if (!CAN.dragDrop) $('#lib-empty p').textContent = 'Add EPUB, MOBI, AZW3, PDF, FB2 or CBZ books from this device, or'
   if (api.platform === 'android') {

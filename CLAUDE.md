@@ -174,6 +174,8 @@ Each section of a reflowable book is its own same-origin iframe document. `onDoc
 
 The current view is captured through `api.capture(rect)`, overlaid as an image, the book moves underneath (`navigateAndSettle`), and the overlay animates away (flip or slide). Pagination waits while `pageAnim` or `pageCapturing` is set.
 
+Without a capture (Android, `CAN.pageCapture` false) the Page turn menu offers only Slide and None (`pageTurnEffect()`), and Slide sets foliate's own `animated` attribute on the renderer: turns and swipe snaps scroll smoothly instead of jumping.
+
 ### Reading time, speed and goals
 
 - A 10 s ticker calls `addReading(READ_TICK)` while a book is open, the window is visible, the reader view is shown, and there was input in the last 5 min (`IDLE_LIMIT`).
