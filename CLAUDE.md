@@ -166,7 +166,7 @@ Each section of a reflowable book is its own same-origin iframe document. `onDoc
 
 - `runPagination()` lays the whole book out off-screen in a hidden `foliate-paginator`, using a separate `makeBook` instance and the same `configureRenderer` and styles. It counts pages per section with `sectionPages()`, which ignores a trailing blank column.
 - The result is cached per `layoutKey()` (stage size and every text setting) in `entry.pagination` (this layout and the previous one, see `savedPagination`).
-- Each `runPagination()` call cancels a count still running for another layout (`pagerJob`), so a short-lived size (Android's keyboard, a rotation and back) never replaces the real counts. On Android nothing is counted while a text field has focus (`typingOnAndroid`).
+- Each `runPagination()` call cancels a count still running for another layout (`pagerJob`), so a short-lived size (Android's keyboard, a rotation and back) never replaces the real counts. On Android nothing is counted while a text field has focus (`typingOnAndroid`). Android also waits `COUNT_PAUSE` (1.5 s) after a page turn or touch before laying out the next chapter, so a long layout doesn't land on the reader's tap.
 - Page numbers are only shown in paginated flow for reflowable books. PDFs use the section index.
 - Two-page spreads: the left page is the lower number.
 
@@ -174,7 +174,7 @@ Each section of a reflowable book is its own same-origin iframe document. `onDoc
 
 The current view is captured through `api.capture(rect)`, overlaid as an image, the book moves underneath (`navigateAndSettle`), and the overlay animates away (flip or slide). Pagination waits while `pageAnim` or `pageCapturing` is set.
 
-On Android the capture is native (`PixelCopy`, at CSS-pixel resolution, returned as base64), so every effect works there too. A swipe drags the page itself, so Android also sets foliate's `animated` attribute (`SWIPE_SLIDE`) and the swipe settles smoothly; `turnPage` removes it while the overlay turns. A platform without a capture would get only Slide (that attribute) and None (`pageTurnEffect()`).
+On Android the capture is native (`PixelCopy`, at CSS-pixel resolution, returned as base64), so every effect works there too. A swipe drags the page itself, so Android also sets foliate's `animated` attribute (`SWIPE_SLIDE`) and the swipe settles smoothly; `turnPage` removes it while the overlay turns. A platform without a capture would get only Slide (that attribute) and None (`pageTurnEffect()`). On Android a capture takes ~150 ms on a slow tablet, so `captureEarly()` starts it when a finger touches down on an arrow or a page-turning edge; `turnPage` uses it if it's under a second old and the page and layout haven't changed.
 
 ### Book layout
 
