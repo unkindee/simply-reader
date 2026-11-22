@@ -562,6 +562,7 @@ window.api = {
   exitApp: () => App.exitApp(),
   setChrome: ({ bg, dark }) => SR.setChrome({ bg, dark }).catch(() => {}),
   keepAwake: on => SR.setKeepAwake({ on: !!on }).catch(() => {}),
+  ready: () => SR.ready().catch(() => {}), // the splash screen can go (MainActivity)
 }
 
 // test hooks for the debug build (driven over the DevTools protocol; harmless otherwise)

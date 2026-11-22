@@ -2121,6 +2121,7 @@ async function openBook(path) {
     showView('reader')
     syncBookLayout() // the stage has its size only now that the reader is shown
     await view.init({ lastLocation: entry.cfi || null })
+    rememberOpenBook(path)
     schedulePagination(300)
     view.renderer.focusView?.()
   } catch (e) {
@@ -2149,6 +2150,7 @@ async function closeBook() {
   await flushBookPrefs()
   if (bookPrefs && Object.keys(bookPrefs).length) { bookPrefs = {}; mergeSettings() }
   if (!view) return
+  rememberOpenBook(null)
   pageAnim?.finish()
   flushReading()
   readFraction = null; readPage = null
@@ -2163,6 +2165,19 @@ async function closeBook() {
   $('#history-back').hidden = true
   searchGen++
   $('#search-results').replaceChildren(); $('#search-status').textContent = ''; $('#search-input').value = ''
+}
+
+// Android ends apps in the background to free memory, and the page engine can crash; either way
+// the app starts again from scratch. The open book is remembered until it's closed and reopens
+// at the next start (see boot), as a paper book stays open at its page.
+const RESUME_KEY = 'resumeBook'
+function rememberOpenBook(path) {
+  if (api.platform !== 'android') return
+  try { if (path) localStorage.setItem(RESUME_KEY, path); else localStorage.removeItem(RESUME_KEY) } catch {}
+}
+function bookToResume() {
+  if (api.platform !== 'android') return null
+  try { return localStorage.getItem(RESUME_KEY) } catch { return null }
 }
 
 async function backToLibrary() {
@@ -4019,26 +4034,43 @@ function applyCapabilities() {
 // ---------------------------------------------------------------- boot
 applyCapabilities()
 api.getVersion?.().then(v => { if (v) $('#app-version').textContent = 'v' + v }).catch(() => {})
+// Android keeps its splash screen up until api.ready(): the first thing seen is the library (or
+// the reader) in the saved theme, not the page half set up. Called once, also if startup fails.
+let readySent = false
+const windowReady = () => { if (!readySent) { readySent = true; api.ready?.() } }
 ;(async () => {
-  try { const s = localStorage.getItem('sort'); if (s) $('#lib-sort').value = s } catch {}
-  // fonts are only needed once a book opens, so they load alongside the library instead of before it
-  const fontsReady = preloadBundledFonts()
-  const [saved, savedGoals] = await Promise.all([api.settings.get(), api.goals.get().catch(() => null), refreshLibrary()])
-  G = { ...DEFAULTS, ...saved }
-  if (savedGoals) goals = savedGoals
-  markGoalIfMet()
-  renderGoalStrip()
-  mergeSettings()
-  initSettingsUI()
-  applySettings()
-  await fontsReady
-  const pending = await api.getPendingFiles()
-  reportRejected(pending)
-  if (pending.length) handlePaths(pending)
-  setTimeout(upgradeCovers, 3000) // after startup settles
-  api.backup.setPrefs(uiPrefs()) // so automatic backups include the view choices
-  try { // a restore reloads the window; say how it went
-    const done = sessionStorage.getItem('restored')
-    if (done) { sessionStorage.removeItem('restored'); toast(done, '', 5000) }
-  } catch {}
+  try {
+    try { const s = localStorage.getItem('sort'); if (s) $('#lib-sort').value = s } catch {}
+    // fonts are only needed once a book opens, so they load alongside the library instead of before it
+    const fontsReady = preloadBundledFonts()
+    const [saved, savedGoals] = await Promise.all([api.settings.get(), api.goals.get().catch(() => null), refreshLibrary()])
+    G = { ...DEFAULTS, ...saved }
+    if (savedGoals) goals = savedGoals
+    markGoalIfMet()
+    renderGoalStrip()
+    mergeSettings()
+    initSettingsUI()
+    applySettings()
+    await fontsReady
+    const pending = await api.getPendingFiles()
+    reportRejected(pending)
+    // the book that was open when Android ended the app; forgotten until it's open again, so a
+    // book that can't be opened doesn't come back at every start
+    const resume = pending.length ? null : bookToResume()
+    const resumeId = resume && await api.bookId(resume).catch(() => null)
+    const reopen = resumeId && libCache[resumeId] && !libCache[resumeId].missing ? resume : null
+    rememberOpenBook(null)
+    if (reopen) showView('reader')
+    windowReady()
+    if (reopen) await openBook(reopen)
+    else if (pending.length) handlePaths(pending)
+    setTimeout(upgradeCovers, 3000) // after startup settles
+    api.backup.setPrefs(uiPrefs()) // so automatic backups include the view choices
+    try { // a restore reloads the window; say how it went
+      const done = sessionStorage.getItem('restored')
+      if (done) { sessionStorage.removeItem('restored'); toast(done, '', 5000) }
+    } catch {}
+  } finally {
+    windowReady()
+  }
 })()

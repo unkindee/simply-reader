@@ -583,6 +583,13 @@ public class SimplyReaderPlugin extends Plugin {
         });
     }
 
+    /** The window has set itself up: the splash screen can go (see MainActivity). */
+    @PluginMethod
+    public void ready(PluginCall call) {
+        MainActivity.markReady();
+        call.resolve();
+    }
+
     /** The screen stays on while a book is being read (the window decides when). */
     @PluginMethod
     public void setKeepAwake(PluginCall call) {
