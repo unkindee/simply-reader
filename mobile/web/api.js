@@ -491,14 +491,13 @@ async function setFullscreen(on) {
   return immersive
 }
 
-// the page-turn animation turns a picture of the page: natively captured (PixelCopy) into the
-// cache, then read back here. rect is in CSS pixels from the top-left of the window.
+// the page-turn animation turns a picture of the page, captured natively (PixelCopy). It's taken
+// at CSS-pixel resolution, as on a desktop at 100 %: full resolution took twice as long to encode,
+// and the picture is only on screen while it moves. rect is in CSS pixels.
 async function capture(rect) {
   const d = devicePixelRatio || 1
-  const { path } = await SR.capture({ x: rect.x * d, y: rect.y * d, width: rect.width * d, height: rect.height * d })
-  const res = await fetch(Cap.convertFileSrc(`${(await info()).cacheDir}/${path}`) + `?t=${Date.now()}`)
-  if (!res.ok) throw new Error(`Couldn’t read the page capture (${res.status})`)
-  return new Uint8Array(await res.arrayBuffer())
+  const { data } = await SR.capture({ x: rect.x * d, y: rect.y * d, width: rect.width * d, height: rect.height * d, scale: 1 / d })
+  return Uint8Array.from(atob(data), c => c.charCodeAt(0))
 }
 
 const unavailable = what => () => Promise.reject(new Error(`${what} isn’t available on Android`))

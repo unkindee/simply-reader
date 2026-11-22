@@ -31,9 +31,9 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -598,12 +598,10 @@ public class SimplyReaderPlugin extends Plugin {
     }
 
     // ---------------------------------------------------------------- page-turn capture
-    private int captureSeq = 0;
-
     /**
      * A JPEG of part of the window, for the page-turn animation (a WebView can't capture itself).
      * x, y, width, height are device pixels from the WebView's top-left; scale (0.25 to 1) sizes
-     * the image. It's written to cache/pagecap/, which the window may load (see MainActivity).
+     * the image. It comes back as base64: reading it from a file took longer, and less evenly.
      */
     @PluginMethod
     public void capture(PluginCall call) {
@@ -626,7 +624,6 @@ public class SimplyReaderPlugin extends Plugin {
                 double scale = Math.min(1.0, Math.max(0.25, call.getDouble("scale", 1.0)));
                 Bitmap bmp = Bitmap.createBitmap(Math.max(1, (int) Math.round((r - l) * scale)),
                     Math.max(1, (int) Math.round((b - t) * scale)), Bitmap.Config.ARGB_8888);
-                String name = "page-" + (captureSeq++ % 4) + ".jpg"; // a few names, so a file still loading isn't overwritten
                 PixelCopy.request(activity.getWindow(), new Rect(l, t, r, b), bmp, result -> {
                     if (result != PixelCopy.SUCCESS) {
                         bmp.recycle();
@@ -635,12 +632,9 @@ public class SimplyReaderPlugin extends Plugin {
                     }
                     work.execute(() -> {
                         try {
-                            File dir = new File(getContext().getCacheDir(), "pagecap");
-                            if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("Couldn't create " + dir);
-                            try (OutputStream out = new FileOutputStream(new File(dir, name))) {
-                                bmp.compress(Bitmap.CompressFormat.JPEG, 85, out);
-                            }
-                            call.resolve(new JSObject().put("path", "pagecap/" + name));
+                            ByteArrayOutputStream jpeg = new ByteArrayOutputStream(256 * 1024);
+                            bmp.compress(Bitmap.CompressFormat.JPEG, 85, jpeg);
+                            call.resolve(new JSObject().put("data", Base64.encodeToString(jpeg.toByteArray(), Base64.NO_WRAP)));
                         } catch (Exception e) {
                             call.reject(Storage.friendly(e.getMessage()), e);
                         } finally {
