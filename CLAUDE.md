@@ -99,7 +99,7 @@ Every key the renderer may write must be in main's `allowed` list in `library-up
 | `cfi`, `fraction`, `chapter`, `lastOpened`, `finishedAt` | Reading position and state. "Finished" = `fraction ≥ 0.995` (`FINISHED`). `finishedAt` (which the yearly goal counts) is set only when that point is reached by a forward page turn, not by a jump (End, the slider, the contents, a search result) |
 | `annotations: [{ value: cfi, color, note, created, … }]`, `bookmarks: [{ cfi, label, created }]` | |
 | `collections: string[]` | |
-| `pagination: { key, pages: number[] }` | Cached page counts per section for one layout key |
+| `pagination: { key, pages: number[], prev? }` | Cached page counts per section for the last layout key, plus `prev: { key, pages }` for the layout before it (rotation, immersive mode) |
 | `prefs` | The book's own reading settings (only `BOOK_KEYS` that differ from the defaults) |
 | `info` | Cached Book-info details: `{ v: INFO_V, description, publisher, published, language, subjects, series, isbn, sections, fixedPages, words }`. Bump `INFO_V` in app.js to force recomputation |
 | `missing` | Recomputed by main on every `library.get` (true when the file is gone). It can end up in library.json but is never trusted from there, and backups strip it |
@@ -165,7 +165,8 @@ Each section of a reflowable book is its own same-origin iframe document. `onDoc
 ### Page numbers
 
 - `runPagination()` lays the whole book out off-screen in a hidden `foliate-paginator`, using a separate `makeBook` instance and the same `configureRenderer` and styles. It counts pages per section with `sectionPages()`, which ignores a trailing blank column.
-- The result is cached per `layoutKey()` (stage size and every text setting) in `entry.pagination`.
+- The result is cached per `layoutKey()` (stage size and every text setting) in `entry.pagination` (this layout and the previous one, see `savedPagination`).
+- Each `runPagination()` call cancels a count still running for another layout (`pagerJob`), so a short-lived size (Android's keyboard, a rotation and back) never replaces the real counts. On Android nothing is counted while a text field has focus (`typingOnAndroid`).
 - Page numbers are only shown in paginated flow for reflowable books. PDFs use the section index.
 - Two-page spreads: the left page is the lower number.
 

@@ -2052,7 +2052,8 @@ async function openBook(path) {
     current = { path, id: entry.id, file, ...info }
     pagerCache = new Map()
     pager = null
-    if (entry.pagination?.key) pagerCache.set(entry.pagination.key, entry.pagination.pages)
+    for (const p of [entry.pagination?.prev, entry.pagination]) // older entries have no prev
+      if (p?.key && Array.isArray(p.pages)) cachePages(p.key, p.pages)
     annotations = (entry.annotations ?? []).map(a => ({ ...a }))
     bookmarks = entry.bookmarks ?? []
     bookPrefs = pickBookPrefs(entry.prefs) // this book's own font size, margins, zoom…
@@ -2271,14 +2272,34 @@ function schedulePagination(delay = 600) {
   pagerTimer = setTimeout(runPagination, delay)
 }
 
+// Android: while a text field has focus the on-screen keyboard shrinks the window, and counting
+// pages for that short-lived size would only compete with the typing (focusout counts again)
+const typingOnAndroid = () => api.platform === 'android' &&
+  !!document.activeElement?.matches('textarea, input:not([type=checkbox], [type=range])')
+if (api.platform === 'android') document.addEventListener('focusout', () => { if (view) schedulePagination(700) })
+
+// remembered most recent last, so the layout before this one is saved with it (see savedPagination)
+function cachePages(key, pages) {
+  pagerCache.delete(key)
+  pagerCache.set(key, pages)
+}
+// the counts saved with the book: this layout's and the previous one (a phone turned sideways,
+// immersive mode on or off), so going back to it doesn't count the whole book again
+function savedPagination(key, pages) {
+  const prev = [...pagerCache].findLast(([k, p]) => k !== key && p.length === pages.length)
+  return prev ? { key, pages, prev: { key: prev[0], pages: prev[1] } } : { key, pages }
+}
+
 async function runPagination() {
-  if (!view || !current) return
+  if (!view || !current || typingOnAndroid()) return
   const key = layoutKey()
+  if (pager?.key === key && !pager.complete) return // already counting this layout
+  // a count still running for another size (a keyboard that was up, a rotation) isn't wanted any more
+  const job = ++pagerJob
   if (pager?.key === key && pager.complete) return updatePageNumbers()
   const cached = pagerCache.get(key)
   if (cached?.length === view.book.sections.length) { setPager(key, cached, true); return updatePageNumbers() }
 
-  const job = ++pagerJob
   const sections = view.book.sections
   const pages = sections.map(() => 0)
   setPager(key, pages, false, 0)
@@ -2324,10 +2345,10 @@ async function runPagination() {
       await wait(0)
     }
     if (job !== pagerJob) return
-    pagerCache.set(key, pages)
+    cachePages(key, pages)
     setPager(key, pages, true)
     updatePageNumbers()
-    api.library.upsert(current.path, { pagination: { key, pages } })
+    api.library.upsert(current.path, { pagination: savedPagination(key, pages) })
   } catch (e) {
     console.error('pagination failed', e)
     if (job === pagerJob) pager = null
@@ -2371,8 +2392,8 @@ function updatePageNumbers() {
   if (pager.pages[index] !== actual && pager.pages[index] > 0) {
     pager.pages[index] = actual
     setPager(pager.key, pager.pages, true)
-    pagerCache.set(pager.key, pager.pages)
-    savePaginationSoon(current.path, { key: pager.key, pages: pager.pages })
+    cachePages(pager.key, pager.pages)
+    savePaginationSoon(current.path, savedPagination(pager.key, pager.pages))
   }
   const spread = Math.min(Math.max(0, r.page - 1), textSpreads - 1)
   const first = pager.starts[index] + spread * perSpread + 1

@@ -1084,8 +1084,14 @@ body[data-view="reader"] .bulk-bar { display: none; }
 .btn:disabled { opacity: .5; cursor: default; pointer-events: none; }
 
 /* ---------- Android (html.android is set by mobile/web/api.js; desktop never has it) ---------- */
-/* touch screens turn pages by tapping the sides or swiping: no hover arrows over the text */
-.android .edge-nav { display: none; }
+/* page arrows: always shown (there's no hover), flush with the screen edges and narrow, so the
+   chevron sits in the page margin rather than over the text; the touch target is tall */
+.android #stage .edge-nav { width: 26px; height: 112px; opacity: .6; transition: opacity .15s; }
+.android .edge-nav.left { left: 0; border-radius: 0 10px 10px 0; }
+.android .edge-nav.right { right: 0; border-radius: 10px 0 0 10px; }
+.android .edge-nav .ic { width: 22px; height: 22px; }
+.android #stage .edge-nav:hover { opacity: .6; background: transparent; color: var(--muted); } /* a tap leaves :hover behind */
+.android #stage .edge-nav:active { opacity: 1; background: var(--surface-2); color: var(--text); }
 /* nothing appears on hover: the card's menu button is always there */
 .android .card .more { opacity: 1; }
 /* the empty library's buttons keep their labels, wrapping if they must */

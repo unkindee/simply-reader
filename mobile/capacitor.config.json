@@ -2,7 +2,7 @@
   "appId": "io.github.unkindee.simplyreader",
   "appName": "Simply Reader",
   "webDir": "www",
-  "loggingBehavior": "debug",
+  "loggingBehavior": "none",
   "server": {
     "androidScheme": "https",
     "appStartPath": "/src/renderer/index.html"
