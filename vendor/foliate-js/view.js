@@ -37,7 +37,19 @@ const makeZipLoader = async file => {
     const load = f => (name, ...args) =>
         map.has(name) ? f(map.get(name), ...args) : null
     const loadText = load(entry => entry.getData(new TextWriter()))
-    const loadBlob = load((entry, type) => entry.getData(new BlobWriter(type)))
+    // (Simply Reader patch) a file stored without compression (fonts and pictures often are) is
+    // cut straight out of the book instead of copied through the ZIP reader: no copy, no wait
+    const stored = async (entry, type) => {
+        if (entry.compressionMethod !== 0 || entry.encrypted
+            || entry.compressedSize !== entry.uncompressedSize) return null
+        const header = new DataView(await file.slice(entry.offset, entry.offset + 30).arrayBuffer())
+        if (header.byteLength < 30 || header.getUint32(0, true) !== 0x04034b50) return null
+        const start = entry.offset + 30 + header.getUint16(26, true) + header.getUint16(28, true)
+        const end = start + entry.uncompressedSize
+        return end <= file.size ? file.slice(start, end, type) : null
+    }
+    const loadBlob = load(async (entry, type) =>
+        await stored(entry, type).catch(() => null) ?? entry.getData(new BlobWriter(type)))
     const getSize = name => map.get(name)?.uncompressedSize ?? 0
     return { entries, loadText, loadBlob, getSize }
 }
