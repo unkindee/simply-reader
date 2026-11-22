@@ -1158,6 +1158,13 @@ body[data-theme="black"] {
   left: 100%; width: var(--edge-r, 5px); border-radius: 0 2px 2px 0;
   background: repeating-linear-gradient(270deg, var(--paper-edge) 0 1px, var(--paper-edge-gap) 1px 2.5px);
 }
+/* a single page (Android, upright): bound on the left, so the fold's shade sits at that edge
+   and only the pages still to read stack up on the right */
+#reader.book-single #book-frame .bf-spine {
+  left: 0; width: 44px;
+  background: linear-gradient(90deg, var(--spine), color-mix(in srgb, var(--spine) 40%, transparent) 30%, transparent);
+}
+#reader.book-single #book-frame .bf-left { display: none; }
 /* running heads: small italic serif over each page (only filled in the book layout) */
 foliate-view::part(head) {
   font: italic 12.5px/1.2 var(--font-serif); letter-spacing: .01em; color: var(--muted); opacity: 1;

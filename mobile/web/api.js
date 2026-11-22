@@ -491,12 +491,22 @@ async function setFullscreen(on) {
   return immersive
 }
 
+// the page-turn animation turns a picture of the page: natively captured (PixelCopy) into the
+// cache, then read back here. rect is in CSS pixels from the top-left of the window.
+async function capture(rect) {
+  const d = devicePixelRatio || 1
+  const { path } = await SR.capture({ x: rect.x * d, y: rect.y * d, width: rect.width * d, height: rect.height * d })
+  const res = await fetch(Cap.convertFileSrc(`${(await info()).cacheDir}/${path}`) + `?t=${Date.now()}`)
+  if (!res.ok) throw new Error(`Couldn’t read the page capture (${res.status})`)
+  return new Uint8Array(await res.arrayBuffer())
+}
+
 const unavailable = what => () => Promise.reject(new Error(`${what} isn’t available on Android`))
 
 window.api = {
   platform: 'android',
   // what this platform can do; the window hides the rest (desktop has everything)
-  capabilities: { folderImport: false, showInFolder: false, dragDrop: false, pageCapture: false, autoBackup: false },
+  capabilities: { folderImport: false, showInFolder: false, dragDrop: false, pageCapture: true, autoBackup: false },
   chooseFiles,
   chooseFolder: async () => [],
   readBook,
@@ -534,7 +544,7 @@ window.api = {
   },
   showInFolder: unavailable('Show in folder'),
   setFullscreen,
-  capture: unavailable('Page capture'),
+  capture,
   saveText: async (name, text) => {
     const safe = String(name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 150)
     return (await SR.saveDocument({ name: safe, text: String(text), mime: 'text/markdown' })).saved

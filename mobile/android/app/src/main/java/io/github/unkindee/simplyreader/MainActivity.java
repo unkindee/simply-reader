@@ -32,8 +32,8 @@ public class MainActivity extends BridgeActivity {
 
     /**
      * Capacitor serves any file the app can read under /_capacitor_file_/ and any content:// URI
-     * under /_capacitor_content_/. The reader needs only its stored books and covers, and an image
-     * just picked for a cover, so everything else is refused.
+     * under /_capacitor_content_/. The reader needs only its stored books and covers, an image just
+     * picked for a cover and the page-turn captures, so everything else is refused.
      */
     static class LocalFilesOnly extends BridgeWebViewClient {
         private final String[] allowed;
@@ -46,6 +46,7 @@ public class MainActivity extends BridgeActivity {
                 canonical(new File(files, "books")) + File.separator,
                 canonical(new File(files, "covers")) + File.separator,
                 canonical(new File(cache, "picked")) + File.separator,
+                canonical(new File(cache, "pagecap")) + File.separator,
             };
         }
 

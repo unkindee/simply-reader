@@ -201,14 +201,15 @@ function applySettings() {
   syncSettingsUI()
   if (!view?.renderer) return
   configureRenderer(view.renderer, S.flow)
-  // without a window capture (Android) the book engine slides its own pages: the arrows, taps
-  // and keys glide to the next page, and a swipe settles smoothly where the finger lets go
-  if (!CAN.pageCapture) view.renderer.toggleAttribute('animated',
+  // the book engine's own slide: on a touch screen (Android) a swipe drags the page and settles
+  // smoothly where the finger lets go; without a window capture it is also how pages turn
+  if (SWIPE_SLIDE || !CAN.pageCapture) view.renderer.toggleAttribute('animated',
     pageTurnEffect() !== 'none' && !matchMedia('(prefers-reduced-motion: reduce)').matches)
   schedulePagination()
 }
 const applySettingsPerFrame = perFrame(applySettings)
 // the page turn this platform can show: everything with a window capture, otherwise slide or none
+const SWIPE_SLIDE = api.platform === 'android'
 const pageTurnEffect = () => CAN.pageCapture || S.pageTurn === 'none' ? S.pageTurn : 'slide'
 // Android: the status and navigation bars take the theme's background colour
 let chromeKey = ''
@@ -2422,18 +2423,27 @@ new ResizeObserver(() => { if (view) { requestAnimationFrame(syncBookLayout); sc
 // column the full-stage layout is kept instead of squeezing the book.
 const BOOK_MARGIN = '44px' // the paginator's header and footer rows: running heads, page numbers
 const DESK_SIDE = 64, DESK_TOP = 6, DESK_BOTTOM = 14 // desk around the paper; the side leaves room for the arrows
+const DESK_SIDE_TOUCH = 28 // Android's page arrows are narrower (see styles.css)
 let bookLayoutOn = false
 function syncBookLayout() {
   const stage = $('#stage')
-  let on = !!S.bookLayout && !!view && !view.isFixedLayout && S.flow === 'paginated' && +S.columns === 2 && api.platform !== 'android'
-  let w = 0, h = 0
+  const android = api.platform === 'android'
+  let on = !!S.bookLayout && !!view && !view.isFixedLayout && S.flow === 'paginated' && (+S.columns === 2 || android)
+  let w = 0, h = 0, single = false
   if (on) {
     const g = +S.gap / 100, col = +S.maxWidth
+    const side = android ? DESK_SIDE_TOUCH : DESK_SIDE
     h = stage.clientHeight - DESK_TOP - DESK_BOTTOM
     // The paginator's text block is min(width × (1 − gap), two columns): wider paper only adds margin.
     // It shows two columns when the block is wider than one column and its box is landscape.
-    w = Math.floor(Math.min(stage.clientWidth - 2 * DESK_SIDE, 2 * col / (1 - g) + 2))
-    on = h >= 320 && w > h && w * (1 - g) > col + 2
+    w = Math.floor(Math.min(stage.clientWidth - 2 * side, 2 * col / (1 - g) + 2))
+    on = h >= 320 && w > h && w * (1 - g) > col + 2 && +S.columns === 2
+    // Android: a screen held upright (or one column chosen) gets a single page on the desk,
+    // no wider than one column, so the paginator never splits it into two
+    if (!on && android && h >= 320) {
+      on = single = true
+      w = Math.floor(Math.min(stage.clientWidth - 2 * side, col / (1 - g)))
+    }
   }
   if (on) {
     stage.style.setProperty('--paper-x', Math.round((stage.clientWidth - w) / 2) + 'px')
@@ -2441,7 +2451,8 @@ function syncBookLayout() {
     stage.style.setProperty('--paper-w', w + 'px')
     stage.style.setProperty('--paper-h', h + 'px')
   }
-  if (on === bookLayoutOn) return
+  $('#reader').classList.toggle('book-single', single)
+  if (on === bookLayoutOn) return updateRunningHeads()
   bookLayoutOn = on
   $('#reader').classList.toggle('book-layout', on) // not 'book': the bookshelf styles .book
   view?.renderer?.setAttribute('margin', on ? BOOK_MARGIN : '28px')
@@ -2451,8 +2462,10 @@ function syncBookLayout() {
 // header on a chapter's opening spread, like a printed book
 function updateRunningHeads() {
   const heads = view?.renderer?.heads ?? []
-  const on = bookLayoutOn && heads.length > 1
+  const on = bookLayoutOn && heads.length > 0
   const chapter = lastLoc?.tocItem?.label?.trim() || current?.author || ''
+  // a single page (Android, upright) carries the chapter
+  if (heads.length === 1) return void (heads[0].textContent = on ? chapter : '')
   heads.forEach((h, i) => { h.textContent = !on ? '' : i === 0 ? current?.title ?? '' : i === 1 ? chapter : '' })
 }
 // the stacks of page edges beside the paper: the left one grows as you read, the right one shrinks
@@ -2794,7 +2807,11 @@ async function turnPage(side) {
     if (url) URL.revokeObjectURL(url)
     return view && navSide(side)
   }
+  // the page underneath jumps: the overlay is the animation (the swipe slide is put back after)
+  const slide = view.renderer.hasAttribute('animated')
+  if (slide) view.renderer.removeAttribute('animated')
   const moved = await navigateAndSettle(side)
+  if (slide) view?.renderer?.setAttribute('animated', '')
   pageCapturing = false
   const cleanup = () => { overlay.el.remove(); URL.revokeObjectURL(url) }
   if (!moved || !view) return cleanup()
@@ -3948,7 +3965,7 @@ function applyCapabilities() {
   if (!CAN.autoBackup) $('#bk-auto').closest('.bk-sec').hidden = true
   // the other effects turn a captured image of the page (see turnPage)
   if (!CAN.pageCapture) $$('#set-pageTurn option').forEach(o => { if (!['slide', 'none'].includes(o.value)) o.remove() })
-  if (api.platform === 'android') $('#set-bookLayout').closest('.set-row').hidden = true // desktop only (syncBookLayout)
+  if (api.platform === 'android') $('#set-bookLayout').closest('.set-row').title = 'Pages are shown as paper on a desk: an open book when two fit side by side'
   if (!CAN.dragDrop) $('#lib-empty p').textContent = 'Add EPUB, MOBI, AZW3, PDF, FB2 or CBZ books from this device, or'
   if (api.platform === 'android') {
     $('#edit-dialog .ed-hint').textContent = 'To change the cover, choose an image, or find one online.'

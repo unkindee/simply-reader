@@ -5,12 +5,17 @@ import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.Intent;
 import android.database.Cursor;
+import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Parcelable;
 import android.provider.OpenableColumns;
 import android.util.Base64;
+import android.view.PixelCopy;
 import android.view.View;
 import android.view.Window;
 import android.webkit.WebView;
@@ -28,6 +33,7 @@ import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -588,6 +594,63 @@ public class SimplyReaderPlugin extends Plugin {
                 c.hide(WindowInsetsCompat.Type.systemBars());
             } else c.show(WindowInsetsCompat.Type.systemBars());
             call.resolve(new JSObject().put("on", on));
+        });
+    }
+
+    // ---------------------------------------------------------------- page-turn capture
+    private int captureSeq = 0;
+
+    /**
+     * A JPEG of part of the window, for the page-turn animation (a WebView can't capture itself).
+     * x, y, width, height are device pixels from the WebView's top-left; scale (0.25 to 1) sizes
+     * the image. It's written to cache/pagecap/, which the window may load (see MainActivity).
+     */
+    @PluginMethod
+    public void capture(PluginCall call) {
+        Activity activity = getActivity();
+        activity.runOnUiThread(() -> {
+            try {
+                WebView web = getBridge().getWebView();
+                View decor = activity.getWindow().getDecorView();
+                int[] at = new int[2];
+                web.getLocationInWindow(at);
+                double x = call.getDouble("x", 0.0), y = call.getDouble("y", 0.0);
+                int l = Math.max(0, at[0] + (int) Math.round(x));
+                int t = Math.max(0, at[1] + (int) Math.round(y));
+                int r = Math.min(decor.getWidth(), at[0] + (int) Math.round(x + call.getDouble("width", 0.0)));
+                int b = Math.min(decor.getHeight(), at[1] + (int) Math.round(y + call.getDouble("height", 0.0)));
+                if (r - l < 1 || b - t < 1) {
+                    call.reject("Nothing to capture");
+                    return;
+                }
+                double scale = Math.min(1.0, Math.max(0.25, call.getDouble("scale", 1.0)));
+                Bitmap bmp = Bitmap.createBitmap(Math.max(1, (int) Math.round((r - l) * scale)),
+                    Math.max(1, (int) Math.round((b - t) * scale)), Bitmap.Config.ARGB_8888);
+                String name = "page-" + (captureSeq++ % 4) + ".jpg"; // a few names, so a file still loading isn't overwritten
+                PixelCopy.request(activity.getWindow(), new Rect(l, t, r, b), bmp, result -> {
+                    if (result != PixelCopy.SUCCESS) {
+                        bmp.recycle();
+                        call.reject("Couldn't capture the page (" + result + ")");
+                        return;
+                    }
+                    work.execute(() -> {
+                        try {
+                            File dir = new File(getContext().getCacheDir(), "pagecap");
+                            if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("Couldn't create " + dir);
+                            try (OutputStream out = new FileOutputStream(new File(dir, name))) {
+                                bmp.compress(Bitmap.CompressFormat.JPEG, 85, out);
+                            }
+                            call.resolve(new JSObject().put("path", "pagecap/" + name));
+                        } catch (Exception e) {
+                            call.reject(Storage.friendly(e.getMessage()), e);
+                        } finally {
+                            bmp.recycle();
+                        }
+                    });
+                }, new Handler(Looper.getMainLooper()));
+            } catch (Exception e) {
+                call.reject(Storage.friendly(e.getMessage()), e);
+            }
         });
     }
 
