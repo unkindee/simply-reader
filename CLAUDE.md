@@ -40,7 +40,7 @@ npm run dist:linux # electron-builder --linux AppImage deb rpm → dist/SimplyRe
 | `src/renderer/app.js` (~3,650 lines) | All renderer logic, split into commented sections (see below) |
 | `src/renderer/styles.css` | All styles. Theme tokens are on `body[data-theme=…]`; newer features append their own block at the end |
 | `src/renderer/fonts/` | Atkinson Hyperlegible (OFL) |
-| `vendor/foliate-js/` | Third-party engine, with four small local patches (see [Vendor patches](#vendor-patches)) |
+| `vendor/foliate-js/` | Third-party engine, with a few local patches (see [Vendor patches](#vendor-patches)) |
 | `dist/` | Build output (exes, `win-unpacked/`). Git-ignored; releases are published on GitHub as `SimplyReader-Setup-<version>.exe` and `SimplyReader-Portable-<version>.exe` |
 | `docs/screenshots/` | README screenshots, taken at 1440×900 from a sandbox library of public-domain Standard Ebooks titles. Never use the user's own books or data for them |
 
@@ -253,9 +253,11 @@ The Android app (`mobile/`, details in `mobile/README.md`) bundles `src/renderer
 Keep these when updating foliate-js. Each is marked `(Simply Reader patch)` where it has a comment.
 
 1. `paginator.js` `setStylesImportant`: return early if the element is gone (a document torn down mid-render).
-2. `pdf.js` `createDocument` per page: a plain-text document from `getTextContent()`, so in-book search, word counts and language detection work for PDFs.
+2. `pdf.js` `createDocument` per page: a plain-text document from `getTextContent()`, so in-book search, word counts and language detection work for PDFs. Each page's text is kept, so searching again doesn't extract it again.
 3. `pdf.js` `renderPage` cover render: scale to about 800 px wide (capped at 4×) for sharp library covers.
 4. `view.js` `makeZipLoader`: a file stored without compression (fonts and pictures often are) is returned as a slice of the book file instead of being copied through zip.js. It checks the local header's signature and falls back to zip.js for anything else.
+5. `pdf.js`: one `PDFWorker` is passed to every document (`pdfWorker()`; not `GlobalWorkerOptions.workerPort`, because a document destroys the worker it got from the global port, breaking any other open PDF). `render` resolves once the canvas is drawn (text and link layers follow) and never rejects, does nothing for a page already drawn at that scale, cancels an older render, clears the text and link layers before drawing them again, and caps the canvas at 2^24 pixels on Android and 2^25 elsewhere (bigger pages are stretched). `pdf.cleanup()` runs 30 s after the last render.
+6. `fixed-layout.js`: a spread is loaded into hidden frames (`#prepare`), drawn (`#draw`) and only then shown (`#show`), so the old pages stay until the new ones are ready, and `relocate` comes after. 600 ms after a turn the next spread is prepared the same way, which makes turning to it immediate. Only the spread shown and the next one are kept; `getContents()` returns the shown spread.
 
 ## Testing
 
