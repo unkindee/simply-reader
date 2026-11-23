@@ -297,9 +297,11 @@ function syncSettingsUI() {
   syncScopeUI()
 }
 
-// current on-screen scale of fixed-layout pages (pdf.js stores it on each page document)
+// current on-screen scale of fixed-layout pages (pdf.js stores it on each page document); the
+// pages shown, not the next ones drawn ahead
 function currentPageScale() {
-  for (const { doc } of liveFxlLayers()) {
+  for (const { doc } of view?.renderer?.getContents?.() ?? []) {
+    if (!doc?.documentElement) continue
     const f = parseFloat(getComputedStyle(doc.documentElement).getPropertyValue('--scale-factor'))
     if (f > 0) return f / devicePixelRatio
   }
@@ -3292,6 +3294,7 @@ function attachFxlLayer(doc, index) {
   Object.assign(overlayer.element.style, { overflow: 'visible', zIndex: '3' })
   doc.body.append(overlayer.element)
   const layer = { doc, index, overlayer }
+  liveFxlLayers() // pages that were let go: otherwise every page turned stays referenced here
   fxlLayers.push(layer)
   let timer
   const redraw = () => {

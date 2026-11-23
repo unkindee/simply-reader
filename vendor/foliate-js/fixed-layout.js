@@ -43,6 +43,13 @@ export class FixedLayout extends HTMLElement {
     #center
     #side
     #zoom
+    // (Simply Reader patch) spreads are prepared before they're shown: their pages are loaded and
+    // drawn while the old pages stay on screen (no blank page during a turn), and the next spread
+    // is prepared in advance, so turning to it is immediate. Only the spread shown and the next
+    // one are kept.
+    #frames = new Map() // spread index -> { left, right } or { center }, plus `ready`
+    #gen = 0
+    #prepareTimer
     constructor() {
         super()
 
@@ -74,6 +81,7 @@ export class FixedLayout extends HTMLElement {
         const onZoom = srcOptionIsString ? null : srcOption?.onZoom
         const element = document.createElement('div')
         element.setAttribute('dir', 'ltr')
+        element.style.display = 'none' // shown by #render once its spread is ready (Simply Reader patch)
         const iframe = document.createElement('iframe')
         element.append(iframe)
         Object.assign(iframe.style, {
@@ -103,25 +111,25 @@ export class FixedLayout extends HTMLElement {
             iframe.src = src
         })
     }
-    #render(side = this.#side) {
-        if (!side) return
-        const left = this.#left ?? {}
-        const right = this.#center ?? this.#right ?? {}
+    // (Simply Reader patch) the layout of any spread, shown or being prepared;
+    // `frames` is { left, right } or { center }
+    #layout(frames, side) {
+        const left = frames.left ?? {}
+        const right = frames.center ?? frames.right ?? {}
         const target = side === 'left' ? left : right
         const { width, height } = this.getBoundingClientRect()
         const portrait = this.spread !== 'both' && this.spread !== 'portrait'
             && height > width
-        this.#portrait = portrait
         const blankWidth = left.width ?? right.width ?? 0
         const blankHeight = left.height ?? right.height ?? 0
 
         const scale = typeof this.#zoom === 'number' && !isNaN(this.#zoom)
             ? this.#zoom
             : (this.#zoom === 'fit-width'
-                ? (portrait || this.#center
+                ? (portrait || frames.center
                     ? width / (target.width ?? blankWidth)
                     : width / ((left.width ?? blankWidth) + (right.width ?? blankWidth)))
-                : (portrait || this.#center
+                : (portrait || frames.center
                     ? Math.min(
                         width / (target.width ?? blankWidth),
                         height / (target.height ?? blankHeight))
@@ -131,11 +139,27 @@ export class FixedLayout extends HTMLElement {
                             left.height ?? blankHeight,
                             right.height ?? blankHeight)))
             ) || 1
+        return { left, right, target, portrait, blankWidth, blankHeight, scale }
+    }
+    // (Simply Reader patch) draws a spread's pages at this scale (PDF pages; a picture page is
+    // decoded) and resolves once they're done
+    #draw(frames, scale) {
+        return Promise.all([frames.left, frames.right, frames.center].map(frame => {
+            const doc = frame?.iframe?.contentDocument
+            if (!doc || frame.blank) return null
+            if (frame.onZoom) return frame.onZoom({ doc, scale })
+            return doc.querySelector('img')?.decode?.().catch(() => {})
+        }))
+    }
+    #render(side = this.#side) {
+        if (!side) return
+        const frames = this.#center ? { center: this.#center } : { left: this.#left, right: this.#right }
+        const { left, right, target, portrait, blankWidth, blankHeight, scale } = this.#layout(frames, side)
+        this.#portrait = portrait
 
         const transform = frame => {
             let { element, iframe, width, height, blank, onZoom } = frame
             if (!iframe) return
-            if (onZoom) onZoom({ doc: frame.iframe.contentDocument, scale })
             const iframeScale = onZoom ? scale : 1
             Object.assign(iframe.style, {
                 width: `${width * iframeScale}px`,
@@ -162,23 +186,73 @@ export class FixedLayout extends HTMLElement {
             transform(left)
             transform(right)
         }
+        return this.#draw(frames, scale)
     }
-    async #showSpread({ left, right, center, side }) {
-        this.#root.replaceChildren()
-        this.#left = null
-        this.#right = null
-        this.#center = null
-        if (center) {
-            this.#center = await this.#createFrame(center)
-            this.#side = 'center'
-            this.#render()
-        } else {
-            this.#left = await this.#createFrame(left)
-            this.#right = await this.#createFrame(right)
-            this.#side = this.#left.blank ? 'right'
-                : this.#right.blank ? 'left' : side
-            this.#render()
+    #sideOf(frames, side) {
+        return frames.center ? 'center'
+            : frames.left?.blank ? 'right' : frames.right?.blank ? 'left' : side
+    }
+    // (Simply Reader patch) loads a spread's pages into hidden frames (once; later calls share it)
+    #prepare(index) {
+        const cached = this.#frames.get(index)
+        if (cached) return cached.ready
+        const spread = this.#spreads[index]
+        const entry = {}
+        const frame = async section => {
+            const created = await this.#createFrame({
+                index: this.book.sections.indexOf(section),
+                src: await section?.load?.(),
+            })
+            if (this.#frames.get(index) !== entry) { // let go while loading (see #show)
+                created.element.remove()
+                throw Object.assign(new Error('spread no longer needed'), { name: 'StaleSpread' })
+            }
+            return created
         }
+        entry.ready = (async () => {
+            if (spread.center) entry.center = await frame(spread.center)
+            else {
+                entry.left = await frame(spread.left)
+                entry.right = await frame(spread.right)
+            }
+            return entry
+        })()
+        entry.ready.catch(() => {
+            if (this.#frames.get(index) === entry) this.#frames.delete(index)
+            for (const f of [entry.left, entry.right, entry.center]) f?.element?.remove()
+        })
+        this.#frames.set(index, entry)
+        return entry.ready
+    }
+    #show(index, entry, side) {
+        for (const frame of [this.#left, this.#right, this.#center])
+            if (frame?.element) frame.element.style.display = 'none'
+        this.#index = index
+        this.#left = entry.left ?? null
+        this.#right = entry.right ?? null
+        this.#center = entry.center ?? null
+        this.#side = side
+        this.#render()
+        for (const [i, other] of this.#frames) if (i !== index && i !== index + 1) {
+            this.#frames.delete(i)
+            for (const frame of [other.left, other.right, other.center]) frame?.element?.remove()
+        }
+    }
+    // the next spread, once a turn has settled (and any page-turn animation has run)
+    #prepareNext() {
+        clearTimeout(this.#prepareTimer)
+        this.#prepareTimer = setTimeout(async () => {
+            const index = this.#index
+            if (index + 1 >= this.#spreads.length) return
+            try {
+                const entry = await this.#prepare(index + 1)
+                if (this.#index !== index) return
+                const side = this.#sideOf(entry, this.rtl ? 'right' : 'left')
+                await this.#draw(entry, this.#layout(entry, side).scale)
+            } catch (e) {
+                if (e?.name !== 'StaleSpread') console.warn(e)
+            }
+        }, 600)
     }
     #goLeft() {
         if (this.#center || this.#left?.blank) return
@@ -245,6 +319,7 @@ export class FixedLayout extends HTMLElement {
     }
     get index() {
         const spread = this.#spreads[this.#index]
+        if (!spread) return -1
         const section = spread?.center ?? (this.#side === 'left'
             ? spread.left ?? spread.right : spread.right ?? spread.left)
         return this.book.sections.indexOf(section)
@@ -268,22 +343,23 @@ export class FixedLayout extends HTMLElement {
             this.#render(side)
             return
         }
-        this.#index = index
-        const spread = this.#spreads[index]
-        if (spread.center) {
-            const index = this.book.sections.indexOf(spread.center)
-            const src = await spread.center?.load?.()
-            await this.#showSpread({ center: { index, src } })
-        } else {
-            const indexL = this.book.sections.indexOf(spread.left)
-            const indexR = this.book.sections.indexOf(spread.right)
-            const srcL = await spread.left?.load?.()
-            const srcR = await spread.right?.load?.()
-            const left = { index: indexL, src: srcL }
-            const right = { index: indexR, src: srcR }
-            await this.#showSpread({ left, right, side })
+        // (Simply Reader patch) the new pages are loaded and drawn before they replace the old
+        // ones, and the move is reported once they're on screen; a newer turn wins
+        const gen = ++this.#gen
+        let entry
+        try {
+            entry = await this.#prepare(index)
+        } catch (e) {
+            if (gen !== this.#gen) return
+            throw e
         }
+        if (gen !== this.#gen) return
+        const shown = this.#sideOf(entry, side)
+        await this.#draw(entry, this.#layout(entry, shown).scale)
+        if (gen !== this.#gen) return
+        this.#show(index, entry, shown)
         this.#reportLocation(reason)
+        this.#prepareNext()
     }
     async select(target) {
         await this.goTo(target)
@@ -306,13 +382,17 @@ export class FixedLayout extends HTMLElement {
         if (!s) return this.goToSpread(this.#index - 1, this.rtl ? 'left' : 'right', 'page')
     }
     getContents() {
-        return Array.from(this.#root.querySelectorAll('iframe'), frame => ({
-            doc: frame.contentDocument,
-            // TODO: index, overlayer
-        }))
+        // the spread shown (prepared spreads are hidden frames too) (Simply Reader patch)
+        return [this.#left, this.#right, this.#center].filter(frame => frame?.iframe)
+            .map(frame => ({
+                doc: frame.iframe.contentDocument,
+                // TODO: index, overlayer
+            }))
     }
     destroy() {
         this.#observer.unobserve(this)
+        clearTimeout(this.#prepareTimer)
+        this.#gen++
     }
 }
 
